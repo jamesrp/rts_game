@@ -210,7 +210,21 @@ func _get_neutral_level(level: int) -> Dictionary:
 		positions.append(extra_positions[i])
 		neutral_units.append(extra_units[i])
 
-	return {"positions": positions, "units": neutral_units, "player_indices": [0], "opponent_indices": []}
+	var forges: Array = []
+	if level == 1:
+		forges = [3, 6]
+	elif level == 2:
+		forges = [3, 6, 9]
+	elif level == 3:
+		forges = [3, 6, 9, 12]
+	else:
+		forges = [3, 6, 9, 12, 14]
+	# Only include forge indices that exist
+	var valid_forges: Array = []
+	for fi in forges:
+		if fi < positions.size():
+			valid_forges.append(fi)
+	return {"positions": positions, "units": neutral_units, "player_indices": [0], "opponent_indices": [], "forges": valid_forges}
 
 func _get_ai_level(level: int) -> Dictionary:
 	if level == 1:
@@ -229,7 +243,7 @@ func _get_ai_level(level: int) -> Dictionary:
 			Vector2(700, 400),
 		]
 		var units: Array = [20, 20, 10, 8, 12, 6, 6, 8, 10, 5, 5]
-		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1]}
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1], "forges": [4, 8]}
 	elif level == 2:
 		# Expander: more neutrals to contest, symmetric start
 		var positions: Array = [
@@ -248,7 +262,7 @@ func _get_ai_level(level: int) -> Dictionary:
 			Vector2(500, 450),
 		]
 		var units: Array = [20, 20, 5, 5, 15, 8, 8, 10, 10, 6, 6, 7, 7]
-		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1]}
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1], "forges": [4, 7, 12]}
 	elif level == 3:
 		# Aggressor: AI gets 2 starting buildings, closer neutrals on AI side
 		var positions: Array = [
@@ -266,7 +280,7 @@ func _get_ai_level(level: int) -> Dictionary:
 			Vector2(350, 100),
 		]
 		var units: Array = [25, 15, 15, 5, 14, 8, 10, 10, 6, 7, 8, 12]
-		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2]}
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2], "forges": [4, 7, 10]}
 	else:
 		# General: AI gets 2 buildings (one pre-upgraded), dense map
 		var positions: Array = [
@@ -287,7 +301,7 @@ func _get_ai_level(level: int) -> Dictionary:
 		]
 		var units: Array = [20, 20, 15, 6, 20, 6, 12, 10, 8, 8, 5, 10, 12, 8]
 		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2],
-			"upgrades": {2: 2}}  # Building index 2 starts at level 2
+			"upgrades": {2: 2}, "forges": [4, 8, 11, 13]}  # Building index 2 starts at level 2
 
 func _start_level(mode: String, level: int) -> void:
 	current_mode = mode
@@ -318,6 +332,8 @@ func _start_level(mode: String, level: int) -> void:
 
 	var upgrades: Dictionary = config.get("upgrades", {})
 
+	var forge_indices: Array = config.get("forges", [])
+
 	for i in range(positions.size()):
 		var owner: String
 		if i in player_indices:
@@ -327,6 +343,7 @@ func _start_level(mode: String, level: int) -> void:
 		else:
 			owner = "neutral"
 		var bld_level: int = upgrades.get(i, 1)
+		var bld_type: String = "forge" if i in forge_indices else "normal"
 		buildings.append({
 			"id": i,
 			"position": positions[i],
@@ -335,6 +352,7 @@ func _start_level(mode: String, level: int) -> void:
 			"level": bld_level,
 			"max_capacity": 20 * bld_level,
 			"gen_timer": 0.0,
+			"type": bld_type,
 		})
 
 func _return_to_menu() -> void:
@@ -377,6 +395,8 @@ func _update_unit_generation(delta: float) -> void:
 	for b in buildings:
 		if b["owner"] == "neutral":
 			continue
+		if b["type"] == "forge":
+			continue
 		var level: int = b["level"]
 		var max_cap: int = 20 * level
 		b["max_capacity"] = max_cap
@@ -409,14 +429,25 @@ func _resolve_arrival(group: Dictionary) -> void:
 		# Reinforce
 		target["units"] += group["count"]
 	else:
-		# Combat
-		var defenders: int = target["units"]
-		var attackers: int = group["count"]
-		if attackers >= defenders:
-			# Capture
-			target["units"] = attackers - defenders
+		# Combat with multipliers
+		var A: float = float(group["count"])
+		var D: float = float(target["units"])
+		var att_mult: float = _get_attacker_multiplier(group["owner"])
+		var def_mult: float = _get_defender_multiplier(target)
+		var attacker_losses: float = D * def_mult / att_mult
+		var defender_losses: float = A * att_mult / def_mult
+		var attacker_remaining: float = A - attacker_losses
+		var defender_remaining: float = D - defender_losses
+
+		if defender_remaining >= attacker_remaining:
+			# Defender holds
+			target["units"] = maxi(0, int(round(defender_remaining)))
+		else:
+			# Attacker captures
+			target["units"] = maxi(1, int(round(attacker_remaining)))
 			target["owner"] = group["owner"]
-			target["level"] = 1
+			if target["type"] != "forge":
+				target["level"] = 1
 			target["gen_timer"] = 0.0
 			sfx_capture.play()
 			visual_effects.append({
@@ -426,8 +457,6 @@ func _resolve_arrival(group: Dictionary) -> void:
 				"duration": 0.4,
 				"color": _get_owner_color(group["owner"]),
 			})
-		else:
-			target["units"] = defenders - attackers
 
 func _get_owner_color(owner: String) -> Color:
 	if owner == "player":
@@ -594,6 +623,8 @@ func _ai_do_upgrade(ai_buildings: Array) -> bool:
 	# Upgrade the building with the most units first (better investment)
 	var sorted: Array = _ai_sort_by_units(ai_buildings)
 	for b in sorted:
+		if b["type"] == "forge":
+			continue
 		var cost: int = _get_upgrade_cost(b["level"])
 		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
@@ -722,6 +753,23 @@ func _ai_find_beatable_target(ai_buildings: Array, total_ai_units: int) -> Dicti
 			best = b
 	return best
 
+# === Combat Multipliers ===
+
+func _count_forges_for_owner(owner: String) -> int:
+	var count: int = 0
+	for b in buildings:
+		if b["type"] == "forge" and b["owner"] == owner:
+			count += 1
+	return count
+
+func _get_defender_multiplier(building: Dictionary) -> float:
+	var forge_count: int = _count_forges_for_owner(building["owner"])
+	return (90.0 + building["level"] * 10.0 + forge_count * 10.0) / 100.0
+
+func _get_attacker_multiplier(owner: String) -> float:
+	var forge_count: int = _count_forges_for_owner(owner)
+	return (100.0 + forge_count * 10.0) / 100.0
+
 # === Win/Lose Conditions ===
 
 func _check_win_condition() -> void:
@@ -816,6 +864,9 @@ func _handle_right_click(pos: Vector2) -> void:
 	var clicked_id: int = _get_building_at(pos)
 	if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
 		var b: Dictionary = buildings[clicked_id]
+		if b["type"] == "forge":
+			selected_building_id = -1
+			return
 		var cost: int = _get_upgrade_cost(b["level"])
 		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
@@ -971,35 +1022,84 @@ func _draw_buildings() -> void:
 			fill_color = Color(0.4, 0.4, 0.4, 0.85)
 			outline_color = Color(0.6, 0.6, 0.6)
 
-		# Draw building background (dark)
-		draw_circle(pos, radius, Color(0.1, 0.1, 0.15))
+		var is_forge: bool = b["type"] == "forge"
 
-		# Draw capacity fill arc (from bottom, clockwise)
-		var max_cap: int = b["max_capacity"]
-		if max_cap > 0:
-			var fill_ratio: float = clampf(float(b["units"]) / max_cap, 0.0, 1.0)
-			if fill_ratio > 0.0:
-				var fill_angle: float = fill_ratio * TAU
-				var start_angle: float = PI / 2.0
-				draw_arc(pos, radius * 0.6, start_angle - fill_angle, start_angle, 48, fill_color, radius * 0.8)
+		if is_forge:
+			# Draw forge as diamond shape
+			var diamond_pts: PackedVector2Array = PackedVector2Array([
+				pos + Vector2(0, -radius),       # top
+				pos + Vector2(radius, 0),        # right
+				pos + Vector2(0, radius),        # bottom
+				pos + Vector2(-radius, 0),       # left
+			])
+			# Background
+			var bg_pts: PackedVector2Array = PackedVector2Array([
+				pos + Vector2(0, -radius),
+				pos + Vector2(radius, 0),
+				pos + Vector2(0, radius),
+				pos + Vector2(-radius, 0),
+			])
+			draw_colored_polygon(bg_pts, Color(0.1, 0.1, 0.15))
+			# Fill based on capacity
+			var max_cap: int = b["max_capacity"]
+			if max_cap > 0:
+				var fill_ratio: float = clampf(float(b["units"]) / max_cap, 0.0, 1.0)
+				if fill_ratio > 0.0:
+					var inner_r: float = radius * 0.7 * fill_ratio
+					var fill_pts: PackedVector2Array = PackedVector2Array([
+						pos + Vector2(0, -inner_r),
+						pos + Vector2(inner_r, 0),
+						pos + Vector2(0, inner_r),
+						pos + Vector2(-inner_r, 0),
+					])
+					draw_colored_polygon(fill_pts, fill_color)
+			# Diamond outline
+			for di in range(4):
+				draw_line(diamond_pts[di], diamond_pts[(di + 1) % 4], outline_color, 2.0)
+			# Small anvil-like mark inside (horizontal line with two short verticals)
+			draw_line(pos + Vector2(-6, 2), pos + Vector2(6, 2), outline_color, 2.0)
+			draw_line(pos + Vector2(-4, -3), pos + Vector2(-4, 2), outline_color, 1.5)
+			draw_line(pos + Vector2(4, -3), pos + Vector2(4, 2), outline_color, 1.5)
+		else:
+			# Draw normal building as circle
+			draw_circle(pos, radius, Color(0.1, 0.1, 0.15))
 
-		# Outline
-		draw_arc(pos, radius, 0, TAU, 48, outline_color, 2.0)
+			# Draw capacity fill arc (from bottom, clockwise)
+			var max_cap: int = b["max_capacity"]
+			if max_cap > 0:
+				var fill_ratio: float = clampf(float(b["units"]) / max_cap, 0.0, 1.0)
+				if fill_ratio > 0.0:
+					var fill_angle: float = fill_ratio * TAU
+					var start_angle: float = PI / 2.0
+					draw_arc(pos, radius * 0.6, start_angle - fill_angle, start_angle, 48, fill_color, radius * 0.8)
 
-		# Upgrade ready indicator — pulsing gold ring (player only)
-		if b["owner"] == "player" and b["level"] < MAX_BUILDING_LEVEL and b["units"] >= _get_upgrade_cost(b["level"]):
+			# Outline
+			draw_arc(pos, radius, 0, TAU, 48, outline_color, 2.0)
+
+		# Upgrade ready indicator — pulsing gold ring (player only, not forges)
+		if not is_forge and b["owner"] == "player" and b["level"] < MAX_BUILDING_LEVEL and b["units"] >= _get_upgrade_cost(b["level"]):
 			var pulse_alpha: float = 0.4 + 0.4 * sin(game_time * 4.0)
 			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.85, 0.2, pulse_alpha), 2.0)
 
 		# Selection highlight
 		if b["id"] == selected_building_id:
-			draw_arc(pos, radius + 4, 0, TAU, 48, Color(1, 1, 0.3, 0.9), 3.0)
+			if is_forge:
+				var sel_r: float = radius + 4
+				var sel_pts: PackedVector2Array = PackedVector2Array([
+					pos + Vector2(0, -sel_r), pos + Vector2(sel_r, 0),
+					pos + Vector2(0, sel_r), pos + Vector2(-sel_r, 0),
+				])
+				for di in range(4):
+					draw_line(sel_pts[di], sel_pts[(di + 1) % 4], Color(1, 1, 0.3, 0.9), 3.0)
+			else:
+				draw_arc(pos, radius + 4, 0, TAU, 48, Color(1, 1, 0.3, 0.9), 3.0)
 
-		# Level indicator — small dots around the building
-		for lv in range(b["level"]):
-			var angle: float = -PI / 2 + lv * (TAU / MAX_BUILDING_LEVEL)
-			var dot_pos: Vector2 = pos + Vector2(cos(angle), sin(angle)) * (radius + 10)
-			draw_circle(dot_pos, 3.0, Color.WHITE)
+		# Level indicator — small dots around the building (skip for forges)
+		if not is_forge:
+			for lv in range(b["level"]):
+				var angle: float = -PI / 2 + lv * (TAU / MAX_BUILDING_LEVEL)
+				var dot_pos: Vector2 = pos + Vector2(cos(angle), sin(angle)) * (radius + 10)
+				draw_circle(dot_pos, 3.0, Color.WHITE)
 
 		# Unit count text
 		var font := ThemeDB.fallback_font
@@ -1080,7 +1180,7 @@ func _draw_hud() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.9, 0.9))
 
 	# Instructions
-	var help_text: String = "Drag or click-click: send units  |  Right-click: upgrade"
+	var help_text: String = "Drag or click-click: send units  |  Right-click: upgrade  |  Forges buff army strength (+10% each)"
 	draw_string(font, Vector2(10, 590), help_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.6, 0.8))
 
