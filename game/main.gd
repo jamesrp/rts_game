@@ -9,7 +9,7 @@ const MAX_BUILDING_LEVEL: int = 4
 
 # === Building Data ===
 var buildings: Array = []
-# Each building: {id, position, owner, units, level, max_capacity, gen_timer}
+# Each building: {id, position, owner, units, level, max_capacity, gen_timer, upgrading, upgrade_progress, upgrade_duration}
 
 # === Unit Groups ===
 var unit_groups: Array = []
@@ -353,6 +353,9 @@ func _start_level(mode: String, level: int) -> void:
 			"max_capacity": 20 * bld_level,
 			"gen_timer": 0.0,
 			"type": bld_type,
+			"upgrading": false,
+			"upgrade_progress": 0.0,
+			"upgrade_duration": 0.0,
 		})
 
 func _return_to_menu() -> void:
@@ -374,6 +377,7 @@ func _process(delta: float) -> void:
 		return
 
 	_update_unit_generation(delta)
+	_update_upgrades(delta)
 	_update_unit_groups(delta)
 	_update_visual_effects(delta)
 	if current_mode == "ai":
@@ -407,6 +411,19 @@ func _update_unit_generation(delta: float) -> void:
 		while b["gen_timer"] >= interval and b["units"] < max_cap:
 			b["gen_timer"] -= interval
 			b["units"] += 1
+
+func _update_upgrades(delta: float) -> void:
+	for b in buildings:
+		if not b["upgrading"]:
+			continue
+		b["upgrade_progress"] += delta / b["upgrade_duration"]
+		if b["upgrade_progress"] >= 1.0:
+			b["upgrading"] = false
+			b["upgrade_progress"] = 0.0
+			b["upgrade_duration"] = 0.0
+			b["level"] += 1
+			b["max_capacity"] = 20 * b["level"]
+			sfx_upgrade.play()
 
 func _update_unit_groups(delta: float) -> void:
 	var resolved: Array = []
@@ -449,6 +466,9 @@ func _resolve_arrival(group: Dictionary) -> void:
 			if target["type"] != "forge":
 				target["level"] = 1
 			target["gen_timer"] = 0.0
+			target["upgrading"] = false
+			target["upgrade_progress"] = 0.0
+			target["upgrade_duration"] = 0.0
 			sfx_capture.play()
 			visual_effects.append({
 				"type": "capture_pop",
@@ -617,19 +637,28 @@ func _get_upgrade_cost(level: int) -> int:
 		3: return 20
 		_: return 999
 
+func _get_upgrade_duration(level: int) -> float:
+	# Duration to upgrade FROM this level to the next
+	match level:
+		1: return 5.0
+		2: return 10.0
+		3: return 15.0
+		_: return 999.0
+
 # === AI Helpers ===
 
 func _ai_do_upgrade(ai_buildings: Array) -> bool:
 	# Upgrade the building with the most units first (better investment)
 	var sorted: Array = _ai_sort_by_units(ai_buildings)
 	for b in sorted:
-		if b["type"] == "forge":
+		if b["type"] == "forge" or b["upgrading"]:
 			continue
 		var cost: int = _get_upgrade_cost(b["level"])
 		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
-			b["level"] += 1
-			b["max_capacity"] = 20 * b["level"]
+			b["upgrading"] = true
+			b["upgrade_progress"] = 0.0
+			b["upgrade_duration"] = _get_upgrade_duration(b["level"])
 			return true
 	return false
 
@@ -864,15 +893,16 @@ func _handle_right_click(pos: Vector2) -> void:
 	var clicked_id: int = _get_building_at(pos)
 	if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
 		var b: Dictionary = buildings[clicked_id]
-		if b["type"] == "forge":
+		if b["type"] == "forge" or b["upgrading"]:
 			selected_building_id = -1
 			return
 		var cost: int = _get_upgrade_cost(b["level"])
 		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
-			b["level"] += 1
-			b["max_capacity"] = 20 * b["level"]
-			sfx_upgrade.play()
+			b["upgrading"] = true
+			b["upgrade_progress"] = 0.0
+			b["upgrade_duration"] = _get_upgrade_duration(b["level"])
+			sfx_click.play()
 			selected_building_id = -1
 			return
 	selected_building_id = -1
@@ -1076,8 +1106,8 @@ func _draw_buildings() -> void:
 			# Outline
 			draw_arc(pos, radius, 0, TAU, 48, outline_color, 2.0)
 
-		# Upgrade ready indicator — pulsing gold ring (player only, not forges)
-		if not is_forge and b["owner"] == "player" and b["level"] < MAX_BUILDING_LEVEL and b["units"] >= _get_upgrade_cost(b["level"]):
+		# Upgrade ready indicator — pulsing gold ring (player only, not forges, not already upgrading)
+		if not is_forge and not b["upgrading"] and b["owner"] == "player" and b["level"] < MAX_BUILDING_LEVEL and b["units"] >= _get_upgrade_cost(b["level"]):
 			var pulse_alpha: float = 0.4 + 0.4 * sin(game_time * 4.0)
 			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.85, 0.2, pulse_alpha), 2.0)
 
@@ -1100,6 +1130,28 @@ func _draw_buildings() -> void:
 				var angle: float = -PI / 2 + lv * (TAU / MAX_BUILDING_LEVEL)
 				var dot_pos: Vector2 = pos + Vector2(cos(angle), sin(angle)) * (radius + 10)
 				draw_circle(dot_pos, 3.0, Color.WHITE)
+			# Upgrade-in-progress: show pie chart on the next level dot
+			if b["upgrading"]:
+				var next_lv: int = b["level"]
+				var angle: float = -PI / 2 + next_lv * (TAU / MAX_BUILDING_LEVEL)
+				var dot_pos: Vector2 = pos + Vector2(cos(angle), sin(angle)) * (radius + 10)
+				var pie_radius: float = 5.0
+				# Background circle (dark)
+				draw_circle(dot_pos, pie_radius, Color(0.25, 0.25, 0.3))
+				# Pie fill arc
+				var fill_angle: float = b["upgrade_progress"] * TAU
+				var start_angle: float = -PI / 2.0
+				if fill_angle > 0.01:
+					# Draw filled pie wedge using polygon segments
+					var segments: int = maxi(3, int(fill_angle / TAU * 32))
+					var pie_pts: PackedVector2Array = PackedVector2Array()
+					pie_pts.append(dot_pos)
+					for seg in range(segments + 1):
+						var seg_angle: float = start_angle + (float(seg) / segments) * fill_angle
+						pie_pts.append(dot_pos + Vector2(cos(seg_angle), sin(seg_angle)) * pie_radius)
+					draw_colored_polygon(pie_pts, Color(1.0, 0.85, 0.2))
+				# Outline
+				draw_arc(dot_pos, pie_radius, 0, TAU, 24, Color(0.8, 0.8, 0.8, 0.6), 1.0)
 
 		# Unit count text
 		var font := ThemeDB.fallback_font
