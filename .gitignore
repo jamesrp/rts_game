@@ -1,0 +1,5 @@
+# Godot 4 generated files
+.godot/
+
+# Web export build output
+build/

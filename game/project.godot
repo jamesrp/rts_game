@@ -1,0 +1,18 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="My 2D Game"
+config/features=PackedStringArray("4.6")
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=800
+window/size/viewport_height=600
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
