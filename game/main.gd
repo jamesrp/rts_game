@@ -28,6 +28,10 @@ var send_ratio: float = 0.5
 var ratio_options: Array = [0.25, 0.5, 0.75, 1.0]
 var ratio_labels: Array = ["25%", "50%", "75%", "100%"]
 
+# === Context Menu State ===
+var context_menu_building_id: int = -1
+var context_menu_options: Array = []  # [{rect, label, action, enabled}]
+
 # === Game State ===
 var game_won: bool = false
 var game_lost: bool = false
@@ -346,6 +350,8 @@ func _start_level(mode: String, level: int) -> void:
 	is_dragging = false
 	drag_source_id = -1
 	send_ratio = 0.5
+	context_menu_building_id = -1
+	context_menu_options.clear()
 
 	var config: Dictionary
 	if mode == "neutral":
@@ -391,6 +397,8 @@ func _return_to_menu() -> void:
 	buildings.clear()
 	unit_groups.clear()
 	visual_effects.clear()
+	context_menu_building_id = -1
+	context_menu_options.clear()
 
 # === Main Loop ===
 
@@ -853,6 +861,70 @@ func _check_win_condition() -> void:
 		elif not has_player:
 			game_lost = true
 
+# === Context Menu ===
+
+func _open_context_menu(building_id: int) -> void:
+	var b: Dictionary = buildings[building_id]
+	context_menu_building_id = building_id
+	selected_building_id = building_id
+	context_menu_options.clear()
+
+	var menu_w: float = 130.0
+	var option_h: float = 30.0
+	var menu_x: float = b["position"].x + 30.0
+	var menu_y: float = b["position"].y - 15.0
+
+	# Clamp to screen bounds
+	if menu_x + menu_w > 790.0:
+		menu_x = b["position"].x - menu_w - 30.0
+	if menu_y < 10.0:
+		menu_y = 10.0
+
+	var y_offset: int = 0
+
+	# Option 1: Level Up (only for normal buildings, not max level, not upgrading)
+	if b["type"] == "normal" and b["level"] < MAX_BUILDING_LEVEL and not b["upgrading"]:
+		var cost: int = _get_upgrade_cost(b["level"])
+		var enabled: bool = b["units"] >= cost
+		context_menu_options.append({
+			"rect": Rect2(menu_x, menu_y + y_offset * option_h, menu_w, option_h),
+			"label": "Level Up (%d)" % cost,
+			"action": "level_up",
+			"enabled": enabled,
+		})
+		y_offset += 1
+
+	# Option 2: Upgrade to Forge (only for normal buildings, not already a forge)
+	if b["type"] == "normal":
+		var forge_cost: int = 30
+		var enabled: bool = b["units"] >= forge_cost
+		context_menu_options.append({
+			"rect": Rect2(menu_x, menu_y + y_offset * option_h, menu_w, option_h),
+			"label": "To Forge (30)",
+			"action": "to_forge",
+			"enabled": enabled,
+		})
+		y_offset += 1
+
+	# If no options available (e.g., a forge), just select without menu
+	if context_menu_options.is_empty():
+		context_menu_building_id = -1
+
+func _close_context_menu() -> void:
+	context_menu_building_id = -1
+	context_menu_options.clear()
+
+func _upgrade_to_forge(b: Dictionary) -> void:
+	b["units"] -= 30
+	b["type"] = "forge"
+	b["level"] = 1
+	b["max_capacity"] = 20
+	b["upgrading"] = false
+	b["upgrade_progress"] = 0.0
+	b["upgrade_duration"] = 0.0
+	b["gen_timer"] = 0.0
+	sfx_upgrade.play()
+
 # === Input ===
 
 func _input(event: InputEvent) -> void:
@@ -889,6 +961,36 @@ func _handle_left_press(pos: Vector2) -> void:
 
 	var clicked_id: int = _get_building_at(pos)
 
+	# If context menu is open, check menu clicks first
+	if context_menu_building_id != -1:
+		for opt in context_menu_options:
+			if opt["rect"].has_point(pos):
+				if opt["enabled"]:
+					var b: Dictionary = buildings[context_menu_building_id]
+					if opt["action"] == "level_up":
+						var cost: int = _get_upgrade_cost(b["level"])
+						b["units"] -= cost
+						b["upgrading"] = true
+						b["upgrade_progress"] = 0.0
+						b["upgrade_duration"] = _get_upgrade_duration(b["level"])
+						sfx_click.play()
+					elif opt["action"] == "to_forge":
+						_upgrade_to_forge(b)
+				_close_context_menu()
+				selected_building_id = -1
+				return
+		# Click on a different building while menu is open → send units
+		if clicked_id != -1 and clicked_id != context_menu_building_id:
+			_send_units(context_menu_building_id, clicked_id)
+			_close_context_menu()
+			selected_building_id = -1
+			return
+		# Click on empty space or same building → close menu
+		_close_context_menu()
+		selected_building_id = -1
+		return
+
+	# No context menu open
 	if selected_building_id == -1:
 		if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
 			is_dragging = true
@@ -910,12 +1012,14 @@ func _handle_left_release(pos: Vector2) -> void:
 		_send_units(drag_source_id, release_id)
 		selected_building_id = -1
 	else:
-		selected_building_id = drag_source_id
+		# Released on empty space or same building → open context menu
+		_open_context_menu(drag_source_id)
 		sfx_click.play()
 	is_dragging = false
 	drag_source_id = -1
 
 func _handle_right_click(pos: Vector2) -> void:
+	_close_context_menu()
 	var clicked_id: int = _get_building_at(pos)
 	if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
 		var b: Dictionary = buildings[clicked_id]
@@ -986,6 +1090,7 @@ func _draw() -> void:
 	_draw_buildings()
 	_draw_unit_groups()
 	_draw_visual_effects()
+	_draw_context_menu()
 	_draw_hud()
 
 # === Level Select Drawing ===
@@ -1230,6 +1335,31 @@ func _draw_unit_groups() -> void:
 		draw_string(font, current + Vector2(8, -4),
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
 
+func _draw_context_menu() -> void:
+	if context_menu_building_id == -1 or context_menu_options.is_empty():
+		return
+	var font := ThemeDB.fallback_font
+	for opt in context_menu_options:
+		var r: Rect2 = opt["rect"]
+		# Background
+		if opt["enabled"]:
+			draw_rect(r, Color(0.15, 0.18, 0.28, 0.95))
+		else:
+			draw_rect(r, Color(0.12, 0.12, 0.16, 0.9))
+		# Border
+		draw_rect(r, Color(0.35, 0.45, 0.7, 0.8), false, 1.0)
+		# Text
+		var text_color: Color
+		if opt["enabled"]:
+			text_color = Color(0.9, 0.95, 1.0)
+		else:
+			text_color = Color(0.4, 0.4, 0.45)
+		var label: String = opt["label"]
+		var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+		var tx: float = r.position.x + 8.0
+		var ty: float = r.position.y + (r.size.y + text_size.y) / 2.0 - 2.0
+		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, text_color)
+
 func _draw_hud() -> void:
 	var font := ThemeDB.fallback_font
 
@@ -1258,7 +1388,7 @@ func _draw_hud() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.9, 0.9))
 
 	# Instructions
-	var help_text: String = "Drag or click-click: send units  |  Right-click: upgrade  |  Forges buff army strength (+10% each)"
+	var help_text: String = "Click: menu  |  Right-click: quick upgrade  |  Drag: send units  |  Forges: +10% strength each"
 	draw_string(font, Vector2(10, 590), help_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.6, 0.8))
 
