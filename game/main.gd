@@ -36,8 +36,6 @@ var visual_effects: Array = []
 
 # === AI State ===
 var ai_timer: float = 0.0
-const AI_INTERVAL: float = 5.0
-const AI_SEND_RATIO: float = 0.6
 
 # === Level Select UI ===
 var level_buttons: Array = []
@@ -73,12 +71,14 @@ func _build_level_select_buttons() -> void:
 
 	# AI mode column (right)
 	var right_x: float = cx + 30.0
-	level_buttons.append({
-		"rect": Rect2(right_x, start_y, btn_w, btn_h),
-		"mode": "ai",
-		"level": 1,
-		"label": "Level 1",
-	})
+	var ai_labels: Array = ["Level 1 - Novice", "Level 2 - Expander", "Level 3 - Aggressor", "Level 4 - General"]
+	for i in range(4):
+		level_buttons.append({
+			"rect": Rect2(right_x, start_y + i * (btn_h + gap), btn_w, btn_h),
+			"mode": "ai",
+			"level": i + 1,
+			"label": ai_labels[i],
+		})
 
 func _init_sounds() -> void:
 	var sample_rate := 22050
@@ -203,22 +203,81 @@ func _get_neutral_level(level: int) -> Dictionary:
 	return {"positions": positions, "units": neutral_units, "player_indices": [0], "opponent_indices": []}
 
 func _get_ai_level(level: int) -> Dictionary:
-	# AI level 1: player bottom-left, opponent top-right, neutrals in between
-	var positions: Array = [
-		Vector2(120, 450),   # Player start
-		Vector2(680, 150),   # Opponent start
-		Vector2(300, 150),
-		Vector2(500, 100),
-		Vector2(400, 300),
-		Vector2(250, 300),
-		Vector2(550, 300),
-		Vector2(350, 480),
-		Vector2(600, 450),
-		Vector2(150, 200),
-		Vector2(700, 400),
-	]
-	var units: Array = [20, 20, 10, 8, 12, 6, 6, 8, 10, 5, 5]
-	return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1]}
+	if level == 1:
+		# Novice: symmetric, player bottom-left, opponent top-right
+		var positions: Array = [
+			Vector2(120, 450),   # Player start
+			Vector2(680, 150),   # Opponent start
+			Vector2(300, 150),
+			Vector2(500, 100),
+			Vector2(400, 300),
+			Vector2(250, 300),
+			Vector2(550, 300),
+			Vector2(350, 480),
+			Vector2(600, 450),
+			Vector2(150, 200),
+			Vector2(700, 400),
+		]
+		var units: Array = [20, 20, 10, 8, 12, 6, 6, 8, 10, 5, 5]
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1]}
+	elif level == 2:
+		# Expander: more neutrals to contest, symmetric start
+		var positions: Array = [
+			Vector2(100, 500),   # Player start
+			Vector2(700, 100),   # Opponent start
+			Vector2(250, 400),   # Near player
+			Vector2(550, 200),   # Near opponent
+			Vector2(400, 300),   # Center
+			Vector2(200, 200),
+			Vector2(600, 400),
+			Vector2(400, 120),
+			Vector2(400, 480),
+			Vector2(150, 300),
+			Vector2(650, 300),
+			Vector2(300, 150),
+			Vector2(500, 450),
+		]
+		var units: Array = [20, 20, 5, 5, 15, 8, 8, 10, 10, 6, 6, 7, 7]
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1]}
+	elif level == 3:
+		# Aggressor: AI gets 2 starting buildings, closer neutrals on AI side
+		var positions: Array = [
+			Vector2(100, 480),   # Player start
+			Vector2(700, 120),   # Opponent start 1
+			Vector2(580, 200),   # Opponent start 2
+			Vector2(500, 100),   # Neutral near AI
+			Vector2(400, 280),   # Center
+			Vector2(250, 350),   # Near player
+			Vector2(600, 380),
+			Vector2(300, 180),
+			Vector2(450, 480),
+			Vector2(150, 220),
+			Vector2(700, 420),
+			Vector2(350, 100),
+		]
+		var units: Array = [25, 15, 15, 5, 14, 8, 10, 10, 6, 7, 8, 12]
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2]}
+	else:
+		# General: AI gets 2 buildings (one pre-upgraded), dense map
+		var positions: Array = [
+			Vector2(100, 500),   # Player start
+			Vector2(700, 100),   # Opponent start 1
+			Vector2(650, 250),   # Opponent start 2 (will be pre-upgraded)
+			Vector2(550, 120),   # Neutral near AI
+			Vector2(400, 300),   # Center (heavily defended)
+			Vector2(200, 380),   # Near player
+			Vector2(500, 400),
+			Vector2(300, 200),
+			Vector2(400, 480),
+			Vector2(150, 200),
+			Vector2(250, 500),
+			Vector2(600, 450),
+			Vector2(350, 120),
+			Vector2(720, 380),
+		]
+		var units: Array = [20, 20, 15, 6, 20, 6, 12, 10, 8, 8, 5, 10, 12, 8]
+		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2],
+			"upgrades": {2: 2}}  # Building index 2 starts at level 2
 
 func _start_level(mode: String, level: int) -> void:
 	current_mode = mode
@@ -247,6 +306,8 @@ func _start_level(mode: String, level: int) -> void:
 	var player_indices: Array = config["player_indices"]
 	var opponent_indices: Array = config["opponent_indices"]
 
+	var upgrades: Dictionary = config.get("upgrades", {})
+
 	for i in range(positions.size()):
 		var owner: String
 		if i in player_indices:
@@ -255,13 +316,14 @@ func _start_level(mode: String, level: int) -> void:
 			owner = "opponent"
 		else:
 			owner = "neutral"
+		var bld_level: int = upgrades.get(i, 1)
 		buildings.append({
 			"id": i,
 			"position": positions[i],
 			"owner": owner,
 			"units": units[i],
-			"level": 1,
-			"max_capacity": 10,
+			"level": bld_level,
+			"max_capacity": 10 * bld_level,
 			"gen_timer": 0.0,
 		})
 
@@ -367,13 +429,27 @@ func _get_owner_color(owner: String) -> Color:
 
 # === AI Logic ===
 
+func _ai_get_interval() -> float:
+	match current_level:
+		1: return 5.0
+		2: return 3.5
+		3: return 2.5
+		_: return 2.0
+
+func _ai_get_send_ratio() -> float:
+	match current_level:
+		1: return 0.6
+		2: return 0.6
+		3: return 0.7
+		_: return 0.8
+
 func _update_ai(delta: float) -> void:
 	ai_timer += delta
-	if ai_timer < AI_INTERVAL:
+	var interval: float = _ai_get_interval()
+	if ai_timer < interval:
 		return
-	ai_timer -= AI_INTERVAL
+	ai_timer -= interval
 
-	# Gather AI buildings
 	var ai_buildings: Array = []
 	for b in buildings:
 		if b["owner"] == "opponent":
@@ -381,63 +457,250 @@ func _update_ai(delta: float) -> void:
 	if ai_buildings.is_empty():
 		return
 
-	# Weighted action selection: upgrade=30, attack=70
-	var roll: float = randf() * 100.0
+	match current_level:
+		1: _ai_novice(ai_buildings)
+		2: _ai_expander(ai_buildings)
+		3: _ai_aggressor(ai_buildings)
+		_: _ai_general(ai_buildings)
 
-	if roll < 30.0:
-		_ai_try_upgrade(ai_buildings)
-	else:
-		_ai_try_attack(ai_buildings)
+# --- Level 1: Novice ---
+# Simple: 30% upgrade, 70% attack weakest building
 
-func _ai_try_upgrade(ai_buildings: Array) -> void:
+func _ai_novice(ai_buildings: Array) -> void:
+	if randf() < 0.3:
+		if _ai_do_upgrade(ai_buildings):
+			return
+	_ai_send_one(ai_buildings, _ai_find_weakest_any(ai_buildings))
+
+# --- Level 2: Expander ---
+# Prioritize neutrals. Can send from 2 buildings per turn.
+
+func _ai_expander(ai_buildings: Array) -> void:
+	if randf() < 0.2:
+		if _ai_do_upgrade(ai_buildings):
+			return
+
+	# Prefer neutral targets; fall back to player targets
+	var target: Dictionary = _ai_find_weakest_neutral(ai_buildings)
+	if target.is_empty():
+		target = _ai_find_weakest_player(ai_buildings)
+	if target.is_empty():
+		return
+
+	# Send from up to 2 buildings toward the same target
+	var sorted_sources: Array = _ai_sort_by_units(ai_buildings)
+	var sends: int = 0
+	for source in sorted_sources:
+		if sends >= 2:
+			break
+		if _ai_do_send(source, target):
+			sends += 1
+
+# --- Level 3: Aggressor ---
+# Targets the player's weakest building. Coordinates multi-source attacks.
+
+func _ai_aggressor(ai_buildings: Array) -> void:
+	if randf() < 0.15:
+		if _ai_do_upgrade(ai_buildings):
+			return
+
+	# Always target the player's weakest building
+	var target: Dictionary = _ai_find_weakest_player(ai_buildings)
+	if target.is_empty():
+		target = _ai_find_weakest_neutral(ai_buildings)
+	if target.is_empty():
+		return
+
+	# Coordinate: send from up to 3 buildings at the same target
+	var sorted_sources: Array = _ai_sort_by_units(ai_buildings)
+	var sends: int = 0
+	for source in sorted_sources:
+		if sends >= 3:
+			break
+		if _ai_do_send(source, target):
+			sends += 1
+
+# --- Level 4: General ---
+# Phased: expand early, upgrade mid, overwhelm late.
+# Smart targeting — only attacks buildings it can beat numerically.
+
+func _ai_general(ai_buildings: Array) -> void:
+	var ai_count: int = ai_buildings.size()
+	var total_ai_units: int = 0
+	var max_level: int = 0
 	for b in ai_buildings:
+		total_ai_units += b["units"]
+		if b["level"] > max_level:
+			max_level = b["level"]
+
+	var neutral_count: int = 0
+	for b in buildings:
+		if b["owner"] == "neutral":
+			neutral_count += 1
+
+	# Phase 1: Expand — grab nearby neutrals first
+	if neutral_count > 0 and ai_count < 4:
+		var target: Dictionary = _ai_find_closest_neutral(ai_buildings)
+		if not target.is_empty():
+			# Send from closest AI building to that neutral
+			var closest_source: Dictionary = _ai_find_closest_source(ai_buildings, target)
+			if not closest_source.is_empty():
+				_ai_do_send(closest_source, target)
+				return
+
+	# Phase 2: Upgrade — get buildings to level 3 before pushing
+	var upgradable: int = 0
+	for b in ai_buildings:
+		if b["level"] < 3:
+			upgradable += 1
+	if upgradable > 0 and randf() < 0.5:
+		if _ai_do_upgrade(ai_buildings):
+			return
+
+	# Phase 3: Attack — only pick fights we can win
+	var target: Dictionary = _ai_find_beatable_target(ai_buildings, total_ai_units)
+	if target.is_empty():
+		# Nothing beatable, upgrade or wait
+		_ai_do_upgrade(ai_buildings)
+		return
+
+	# All-in: send from all buildings with units
+	var sorted_sources: Array = _ai_sort_by_units(ai_buildings)
+	for source in sorted_sources:
+		_ai_do_send(source, target)
+
+# === AI Helpers ===
+
+func _ai_do_upgrade(ai_buildings: Array) -> bool:
+	# Upgrade the building with the most units first (better investment)
+	var sorted: Array = _ai_sort_by_units(ai_buildings)
+	for b in sorted:
 		if b["level"] < 3 and b["units"] >= 10:
 			b["units"] -= 10
 			b["level"] += 1
 			b["max_capacity"] = 10 * b["level"]
-			return
-	# Can't upgrade, attack instead
-	_ai_try_attack(ai_buildings)
+			return true
+	return false
 
-func _ai_try_attack(ai_buildings: Array) -> void:
-	# Find best source (most units)
+func _ai_do_send(source: Dictionary, target: Dictionary) -> bool:
+	var send_count: int = int(source["units"] * _ai_get_send_ratio())
+	if send_count <= 2:
+		return false
+	source["units"] -= send_count
+	unit_groups.append({
+		"count": send_count,
+		"source_id": source["id"],
+		"target_id": target["id"],
+		"owner": "opponent",
+		"progress": 0.0,
+		"speed": 150.0,
+		"start_pos": source["position"],
+		"end_pos": target["position"],
+	})
+	return true
+
+func _ai_send_one(ai_buildings: Array, target: Dictionary) -> void:
+	if target.is_empty():
+		return
 	var best_source: Dictionary = {}
 	var best_units: int = 0
 	for b in ai_buildings:
 		if b["units"] > best_units:
 			best_units = b["units"]
 			best_source = b
-	if best_source.is_empty() or best_units < 3:
-		return
+	if not best_source.is_empty():
+		_ai_do_send(best_source, target)
 
-	# Find weakest non-opponent building
-	var best_target: Dictionary = {}
-	var lowest_units: int = 9999
+func _ai_sort_by_units(ai_buildings: Array) -> Array:
+	var sorted: Array = ai_buildings.duplicate()
+	sorted.sort_custom(func(a, b): return a["units"] > b["units"])
+	return sorted
+
+func _ai_find_weakest_any(ai_buildings: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var lowest: int = 9999
 	for b in buildings:
 		if b["owner"] == "opponent":
 			continue
-		# Prefer buildings close to AI buildings
-		if b["units"] < lowest_units:
-			lowest_units = b["units"]
-			best_target = b
-	if best_target.is_empty():
-		return
+		if b["units"] < lowest:
+			lowest = b["units"]
+			best = b
+	return best
 
-	# Send units
-	var send_count: int = int(best_source["units"] * AI_SEND_RATIO)
-	if send_count <= 0:
-		return
-	best_source["units"] -= send_count
-	unit_groups.append({
-		"count": send_count,
-		"source_id": best_source["id"],
-		"target_id": best_target["id"],
-		"owner": "opponent",
-		"progress": 0.0,
-		"speed": 150.0,
-		"start_pos": best_source["position"],
-		"end_pos": best_target["position"],
-	})
+func _ai_find_weakest_neutral(_ai_buildings: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var lowest: int = 9999
+	for b in buildings:
+		if b["owner"] != "neutral":
+			continue
+		if b["units"] < lowest:
+			lowest = b["units"]
+			best = b
+	return best
+
+func _ai_find_weakest_player(_ai_buildings: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var lowest: int = 9999
+	for b in buildings:
+		if b["owner"] != "player":
+			continue
+		if b["units"] < lowest:
+			lowest = b["units"]
+			best = b
+	return best
+
+func _ai_find_closest_neutral(ai_buildings: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var best_dist: float = 99999.0
+	for b in buildings:
+		if b["owner"] != "neutral":
+			continue
+		for ab in ai_buildings:
+			var dist: float = ab["position"].distance_to(b["position"])
+			if dist < best_dist:
+				best_dist = dist
+				best = b
+	return best
+
+func _ai_find_closest_source(ai_buildings: Array, target: Dictionary) -> Dictionary:
+	var best: Dictionary = {}
+	var best_dist: float = 99999.0
+	for b in ai_buildings:
+		if b["units"] < 3:
+			continue
+		var dist: float = b["position"].distance_to(target["position"])
+		if dist < best_dist:
+			best_dist = dist
+			best = b
+	return best
+
+func _ai_find_beatable_target(ai_buildings: Array, total_ai_units: int) -> Dictionary:
+	# Find a non-opponent building we can overwhelm
+	# Prefer targets where we have > 1.5x the defenders
+	var best: Dictionary = {}
+	var best_score: float = -1.0
+	for b in buildings:
+		if b["owner"] == "opponent":
+			continue
+		var defenders: int = b["units"]
+		if defenders <= 0:
+			defenders = 1
+		var sendable: int = int(total_ai_units * _ai_get_send_ratio())
+		var ratio: float = float(sendable) / float(defenders)
+		if ratio < 1.5:
+			continue
+		# Score: prefer weaker targets that are closer to AI buildings
+		var min_dist: float = 99999.0
+		for ab in ai_buildings:
+			var dist: float = ab["position"].distance_to(b["position"])
+			if dist < min_dist:
+				min_dist = dist
+		# Higher score = better target (low defenders, close distance)
+		var score: float = ratio / (min_dist + 50.0) * 1000.0
+		if score > best_score:
+			best_score = score
+			best = b
+	return best
 
 # === Win/Lose Conditions ===
 
