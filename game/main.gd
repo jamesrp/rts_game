@@ -11,6 +11,16 @@ var unit_groups: Array = []
 # === Selection State ===
 var selected_building_id: int = -1
 
+# === Drag State ===
+var is_dragging: bool = false
+var drag_source_id: int = -1
+var drag_current_pos: Vector2 = Vector2.ZERO
+
+# === Send Ratio ===
+var send_ratio: float = 0.5
+var ratio_options: Array = [0.25, 0.5, 0.75, 1.0]
+var ratio_labels: Array = ["25%", "50%", "75%", "100%"]
+
 # === Game State ===
 var game_won: bool = false
 
@@ -118,28 +128,50 @@ func _check_win_condition() -> void:
 func _input(event: InputEvent) -> void:
 	if game_won:
 		return
-	if event is InputEventMouseButton and event.pressed:
-		var pos: Vector2 = event.position
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			_handle_left_click(pos)
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			_handle_right_click(pos)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_handle_left_press(event.position)
+		else:
+			_handle_left_release(event.position)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		_handle_right_click(event.position)
+	elif event is InputEventMouseMotion and is_dragging:
+		drag_current_pos = event.position
 
-func _handle_left_click(pos: Vector2) -> void:
+func _handle_left_press(pos: Vector2) -> void:
+	# Check ratio bar click first
+	if _handle_ratio_click(pos):
+		return
+
 	var clicked_id: int = _get_building_at(pos)
 
 	if selected_building_id == -1:
-		# Nothing selected — try to select a player building
+		# Nothing selected — try to select/start drag on a player building
 		if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
-			selected_building_id = clicked_id
+			is_dragging = true
+			drag_source_id = clicked_id
+			drag_current_pos = pos
 	else:
+		# Already have a click-selected building — send or deselect
 		if clicked_id == -1 or clicked_id == selected_building_id:
-			# Clicked empty space or same building — deselect
 			selected_building_id = -1
 		elif clicked_id != selected_building_id:
-			# Send units to target
 			_send_units(selected_building_id, clicked_id)
 			selected_building_id = -1
+
+func _handle_left_release(pos: Vector2) -> void:
+	if not is_dragging:
+		return
+	var release_id: int = _get_building_at(pos)
+	if release_id != -1 and release_id != drag_source_id:
+		# Dragged to a different building — send units
+		_send_units(drag_source_id, release_id)
+		selected_building_id = -1
+	else:
+		# Released on same building or empty space — treat as click-select
+		selected_building_id = drag_source_id
+	is_dragging = false
+	drag_source_id = -1
 
 func _handle_right_click(pos: Vector2) -> void:
 	var clicked_id: int = _get_building_at(pos)
@@ -154,6 +186,21 @@ func _handle_right_click(pos: Vector2) -> void:
 			return
 	selected_building_id = -1
 
+func _handle_ratio_click(pos: Vector2) -> bool:
+	var bar_x: float = 8.0
+	var bar_w: float = 36.0
+	var bar_y: float = 80.0
+	var section_h: float = 50.0
+	if pos.x < bar_x or pos.x > bar_x + bar_w:
+		return false
+	if pos.y < bar_y or pos.y > bar_y + section_h * 4:
+		return false
+	var index: int = int((pos.y - bar_y) / section_h)
+	index = clampi(index, 0, 3)
+	# Options are displayed top-to-bottom as 100%, 75%, 50%, 25%
+	send_ratio = ratio_options[3 - index]
+	return true
+
 func _get_building_at(pos: Vector2) -> int:
 	for b in buildings:
 		var radius: float = 20.0 + b["level"] * 5.0
@@ -165,7 +212,7 @@ func _send_units(source_id: int, target_id: int) -> void:
 	var source: Dictionary = buildings[source_id]
 	if source["owner"] != "player":
 		return
-	var send_count: int = source["units"] / 2
+	var send_count: int = int(source["units"] * send_ratio)
 	if send_count <= 0:
 		return
 	source["units"] -= send_count
@@ -185,6 +232,7 @@ func _send_units(source_id: int, target_id: int) -> void:
 func _draw() -> void:
 	_draw_background()
 	_draw_unit_group_lines()
+	_draw_drag_line()
 	_draw_buildings()
 	_draw_unit_groups()
 	_draw_hud()
@@ -233,6 +281,18 @@ func _draw_buildings() -> void:
 		draw_string(font, pos - Vector2(text_size.x / 2, -5),
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 
+func _draw_drag_line() -> void:
+	if not is_dragging or drag_source_id == -1:
+		return
+	var start: Vector2 = buildings[drag_source_id]["position"]
+	var hover_id: int = _get_building_at(drag_current_pos)
+	var end: Vector2 = drag_current_pos
+	var line_color := Color(0.4, 0.7, 1.0, 0.5)
+	if hover_id != -1 and hover_id != drag_source_id:
+		end = buildings[hover_id]["position"]
+		line_color = Color(0.5, 0.9, 0.5, 0.7)
+	draw_line(start, end, line_color, 2.0)
+
 func _draw_unit_group_lines() -> void:
 	for g in unit_groups:
 		var start: Vector2 = g["start_pos"]
@@ -263,12 +323,51 @@ func _draw_hud() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.9, 0.9))
 
 	# Instructions
-	var help_text: String = "Left-click: select/send  |  Right-click: upgrade/deselect"
+	var help_text: String = "Drag or click-click: send units  |  Right-click: upgrade"
 	draw_string(font, Vector2(10, 590), help_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.6, 0.8))
+
+	# Send ratio bar
+	_draw_ratio_bar()
 
 	if game_won:
 		var win_text: String = "VICTORY! All buildings captured!"
 		var win_size := font.get_string_size(win_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 32)
 		draw_string(font, Vector2(400 - win_size.x / 2, 300),
 			win_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1, 1, 0.3))
+
+func _draw_ratio_bar() -> void:
+	var font := ThemeDB.fallback_font
+	var bar_x: float = 8.0
+	var bar_w: float = 36.0
+	var bar_y: float = 80.0
+	var section_h: float = 50.0
+	# Display labels top-to-bottom: 100%, 75%, 50%, 25%
+	var display_labels: Array = ["100%", "75%", "50%", "25%"]
+	var display_ratios: Array = [1.0, 0.75, 0.5, 0.25]
+
+	# Bar background
+	draw_rect(Rect2(bar_x, bar_y, bar_w, section_h * 4), Color(0.1, 0.1, 0.15, 0.9))
+
+	for i in range(4):
+		var sy: float = bar_y + i * section_h
+		var is_selected: bool = absf(send_ratio - display_ratios[i]) < 0.01
+
+		# Highlight selected section
+		if is_selected:
+			draw_rect(Rect2(bar_x, sy, bar_w, section_h), Color(0.2, 0.4, 0.9, 0.7))
+
+		# Section divider
+		if i > 0:
+			draw_line(Vector2(bar_x, sy), Vector2(bar_x + bar_w, sy), Color(0.3, 0.3, 0.4), 1.0)
+
+		# Label
+		var label: String = display_labels[i]
+		var text_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+		var tx: float = bar_x + (bar_w - text_size.x) / 2.0
+		var ty: float = sy + (section_h + text_size.y) / 2.0 - 2.0
+		var text_color := Color(1, 1, 1) if is_selected else Color(0.6, 0.6, 0.6)
+		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_color)
+
+	# Border
+	draw_rect(Rect2(bar_x, bar_y, bar_w, section_h * 4), Color(0.4, 0.4, 0.5), false, 1.0)

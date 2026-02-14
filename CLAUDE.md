@@ -18,14 +18,16 @@ Single-player RTS game built with Godot 4.6, exported to web. Player captures ne
 cd /home/sprite/rts_game/game && godot --headless --export-release "Web" build/index.html
 ```
 
+**You MUST `cd` into `game/` first.** Godot requires the working directory to be the project root (where `project.godot` lives). Running from the repo root will fail because Godot won't find `project.godot`, the export preset, or the build output path.
+
 Then refresh the browser. Without this, the old `.pck` is served.
 
 ## Validation
 
-Check for parse errors without a display:
+Check for parse errors without a display. **Run this from `game/`, not the repo root:**
 
 ```bash
-godot --headless --quit
+cd /home/sprite/rts_game/game && godot --headless --quit
 ```
 
 This loads the project and exits. Errors will print to stderr.
