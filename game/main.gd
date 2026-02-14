@@ -82,11 +82,11 @@ func _build_level_select_buttons() -> void:
 
 func _init_sounds() -> void:
 	var sample_rate := 22050
-	# Click: short sine blip 800Hz, ~80ms
+	# Click: soft sine pop 440Hz, ~100ms, exponential decay with fade-in
 	sfx_click = AudioStreamPlayer.new()
 	sfx_click.bus = "Master"
 	add_child(sfx_click)
-	var click_samples := int(sample_rate * 0.08)
+	var click_samples := int(sample_rate * 0.10)
 	var click_wav := AudioStreamWAV.new()
 	click_wav.format = AudioStreamWAV.FORMAT_8_BITS
 	click_wav.mix_rate = sample_rate
@@ -95,37 +95,41 @@ func _init_sounds() -> void:
 	click_data.resize(click_samples)
 	for i in range(click_samples):
 		var t := float(i) / sample_rate
-		var env := 1.0 - float(i) / click_samples
-		var val := sin(TAU * 800.0 * t) * env
+		var p := float(i) / click_samples
+		var attack := minf(p / 0.05, 1.0)
+		var env := attack * exp(-6.0 * p)
+		var val := sin(TAU * 440.0 * t) * env * 0.7
 		click_data[i] = int((val * 0.5 + 0.5) * 255.0)
 	click_wav.data = click_data
 	sfx_click.stream = click_wav
 
-	# Whoosh: noise sweep with fade, ~200ms
+	# Whoosh: filtered noise with smooth envelope, ~250ms
 	sfx_whoosh = AudioStreamPlayer.new()
 	sfx_whoosh.bus = "Master"
 	add_child(sfx_whoosh)
-	var whoosh_samples := int(sample_rate * 0.2)
+	var whoosh_samples := int(sample_rate * 0.25)
 	var whoosh_wav := AudioStreamWAV.new()
 	whoosh_wav.format = AudioStreamWAV.FORMAT_8_BITS
 	whoosh_wav.mix_rate = sample_rate
 	whoosh_wav.stereo = false
 	var whoosh_data := PackedByteArray()
 	whoosh_data.resize(whoosh_samples)
+	var prev_noise := 0.0
 	for i in range(whoosh_samples):
-		var progress := float(i) / whoosh_samples
-		var env := 1.0 - progress
-		env *= env
-		var noise := randf_range(-1.0, 1.0) * env
-		whoosh_data[i] = int((noise * 0.5 + 0.5) * 255.0)
+		var p := float(i) / whoosh_samples
+		var attack := minf(p / 0.1, 1.0)
+		var env := attack * exp(-4.0 * p)
+		var raw := randf_range(-1.0, 1.0)
+		prev_noise = prev_noise * 0.7 + raw * 0.3
+		whoosh_data[i] = int((prev_noise * env * 0.5 * 0.5 + 0.5) * 255.0)
 	whoosh_wav.data = whoosh_data
 	sfx_whoosh.stream = whoosh_wav
 
-	# Capture chime: two-tone ascending C5->E5, ~250ms
+	# Capture chime: two-tone ascending C4->E4, ~350ms, smooth crossfade
 	sfx_capture = AudioStreamPlayer.new()
 	sfx_capture.bus = "Master"
 	add_child(sfx_capture)
-	var cap_samples := int(sample_rate * 0.25)
+	var cap_samples := int(sample_rate * 0.35)
 	var cap_wav := AudioStreamWAV.new()
 	cap_wav.format = AudioStreamWAV.FORMAT_8_BITS
 	cap_wav.mix_rate = sample_rate
@@ -135,18 +139,20 @@ func _init_sounds() -> void:
 	for i in range(cap_samples):
 		var t := float(i) / sample_rate
 		var p := float(i) / cap_samples
-		var env := 1.0 - p
-		var freq := 523.25 if p < 0.5 else 659.25
-		var val := sin(TAU * freq * t) * env
+		var attack := minf(p / 0.05, 1.0)
+		var env := attack * exp(-3.0 * p)
+		var blend := clampf((p - 0.4) / 0.2, 0.0, 1.0)
+		var freq := lerpf(261.63, 329.63, blend)
+		var val := sin(TAU * freq * t) * env * 0.7
 		cap_data[i] = int((val * 0.5 + 0.5) * 255.0)
 	cap_wav.data = cap_data
 	sfx_capture.stream = cap_wav
 
-	# Upgrade ding: bright sine with harmonics, 1200Hz, ~200ms
+	# Upgrade ding: warm sine 600Hz, gentle harmonic, ~300ms
 	sfx_upgrade = AudioStreamPlayer.new()
 	sfx_upgrade.bus = "Master"
 	add_child(sfx_upgrade)
-	var ding_samples := int(sample_rate * 0.2)
+	var ding_samples := int(sample_rate * 0.3)
 	var ding_wav := AudioStreamWAV.new()
 	ding_wav.format = AudioStreamWAV.FORMAT_8_BITS
 	ding_wav.mix_rate = sample_rate
@@ -155,8 +161,10 @@ func _init_sounds() -> void:
 	ding_data.resize(ding_samples)
 	for i in range(ding_samples):
 		var t := float(i) / sample_rate
-		var env := 1.0 - float(i) / ding_samples
-		var val := (sin(TAU * 1200.0 * t) + 0.5 * sin(TAU * 2400.0 * t)) * env / 1.5
+		var p := float(i) / ding_samples
+		var attack := minf(p / 0.05, 1.0)
+		var env := attack * exp(-4.0 * p)
+		var val := (sin(TAU * 600.0 * t) + 0.2 * sin(TAU * 1200.0 * t)) * env * 0.6
 		ding_data[i] = int((val * 0.5 + 0.5) * 255.0)
 	ding_wav.data = ding_data
 	sfx_upgrade.stream = ding_wav
