@@ -23,9 +23,101 @@ var ratio_labels: Array = ["25%", "50%", "75%", "100%"]
 
 # === Game State ===
 var game_won: bool = false
+var game_time: float = 0.0
+
+# === Visual Effects ===
+var visual_effects: Array = []
+
+# === Sound Players ===
+var sfx_click: AudioStreamPlayer
+var sfx_whoosh: AudioStreamPlayer
+var sfx_capture: AudioStreamPlayer
+var sfx_upgrade: AudioStreamPlayer
 
 func _ready() -> void:
 	_init_buildings()
+	_init_sounds()
+
+func _init_sounds() -> void:
+	var sample_rate := 22050
+	# Click: short sine blip 800Hz, ~80ms
+	sfx_click = AudioStreamPlayer.new()
+	sfx_click.bus = "Master"
+	add_child(sfx_click)
+	var click_samples := int(sample_rate * 0.08)
+	var click_wav := AudioStreamWAV.new()
+	click_wav.format = AudioStreamWAV.FORMAT_8_BITS
+	click_wav.mix_rate = sample_rate
+	click_wav.stereo = false
+	var click_data := PackedByteArray()
+	click_data.resize(click_samples)
+	for i in range(click_samples):
+		var t := float(i) / sample_rate
+		var env := 1.0 - float(i) / click_samples
+		var val := sin(TAU * 800.0 * t) * env
+		click_data[i] = int((val * 0.5 + 0.5) * 255.0)
+	click_wav.data = click_data
+	sfx_click.stream = click_wav
+
+	# Whoosh: noise sweep with fade, ~200ms
+	sfx_whoosh = AudioStreamPlayer.new()
+	sfx_whoosh.bus = "Master"
+	add_child(sfx_whoosh)
+	var whoosh_samples := int(sample_rate * 0.2)
+	var whoosh_wav := AudioStreamWAV.new()
+	whoosh_wav.format = AudioStreamWAV.FORMAT_8_BITS
+	whoosh_wav.mix_rate = sample_rate
+	whoosh_wav.stereo = false
+	var whoosh_data := PackedByteArray()
+	whoosh_data.resize(whoosh_samples)
+	for i in range(whoosh_samples):
+		var progress := float(i) / whoosh_samples
+		var env := 1.0 - progress
+		env *= env
+		var noise := randf_range(-1.0, 1.0) * env
+		whoosh_data[i] = int((noise * 0.5 + 0.5) * 255.0)
+	whoosh_wav.data = whoosh_data
+	sfx_whoosh.stream = whoosh_wav
+
+	# Capture chime: two-tone ascending C5->E5, ~250ms
+	sfx_capture = AudioStreamPlayer.new()
+	sfx_capture.bus = "Master"
+	add_child(sfx_capture)
+	var cap_samples := int(sample_rate * 0.25)
+	var cap_wav := AudioStreamWAV.new()
+	cap_wav.format = AudioStreamWAV.FORMAT_8_BITS
+	cap_wav.mix_rate = sample_rate
+	cap_wav.stereo = false
+	var cap_data := PackedByteArray()
+	cap_data.resize(cap_samples)
+	for i in range(cap_samples):
+		var t := float(i) / sample_rate
+		var progress := float(i) / cap_samples
+		var env := 1.0 - progress
+		var freq := 523.25 if progress < 0.5 else 659.25
+		var val := sin(TAU * freq * t) * env
+		cap_data[i] = int((val * 0.5 + 0.5) * 255.0)
+	cap_wav.data = cap_data
+	sfx_capture.stream = cap_wav
+
+	# Upgrade ding: bright sine with harmonics, 1200Hz, ~200ms
+	sfx_upgrade = AudioStreamPlayer.new()
+	sfx_upgrade.bus = "Master"
+	add_child(sfx_upgrade)
+	var ding_samples := int(sample_rate * 0.2)
+	var ding_wav := AudioStreamWAV.new()
+	ding_wav.format = AudioStreamWAV.FORMAT_8_BITS
+	ding_wav.mix_rate = sample_rate
+	ding_wav.stereo = false
+	var ding_data := PackedByteArray()
+	ding_data.resize(ding_samples)
+	for i in range(ding_samples):
+		var t := float(i) / sample_rate
+		var env := 1.0 - float(i) / ding_samples
+		var val := (sin(TAU * 1200.0 * t) + 0.5 * sin(TAU * 2400.0 * t)) * env / 1.5
+		ding_data[i] = int((val * 0.5 + 0.5) * 255.0)
+	ding_wav.data = ding_data
+	sfx_upgrade.stream = ding_wav
 
 func _init_buildings() -> void:
 	var positions := [
@@ -61,14 +153,26 @@ func _init_buildings() -> void:
 		})
 
 func _process(delta: float) -> void:
+	game_time += delta
 	if game_won:
 		queue_redraw()
 		return
 
 	_update_unit_generation(delta)
 	_update_unit_groups(delta)
+	_update_visual_effects(delta)
 	_check_win_condition()
 	queue_redraw()
+
+func _update_visual_effects(delta: float) -> void:
+	var to_remove: Array = []
+	for i in range(visual_effects.size()):
+		visual_effects[i]["timer"] += delta
+		if visual_effects[i]["timer"] >= visual_effects[i]["duration"]:
+			to_remove.append(i)
+	to_remove.reverse()
+	for idx in to_remove:
+		visual_effects.remove_at(idx)
 
 func _update_unit_generation(delta: float) -> void:
 	for b in buildings:
@@ -116,6 +220,14 @@ func _resolve_arrival(group: Dictionary) -> void:
 			target["owner"] = group["owner"]
 			target["level"] = 1
 			target["gen_timer"] = 0.0
+			sfx_capture.play()
+			visual_effects.append({
+				"type": "capture_pop",
+				"position": target["position"],
+				"timer": 0.0,
+				"duration": 0.4,
+				"color": Color(0.3, 0.5, 1.0) if group["owner"] == "player" else Color(0.6, 0.6, 0.6),
+			})
 		else:
 			target["units"] = defenders - attackers
 
@@ -151,6 +263,7 @@ func _handle_left_press(pos: Vector2) -> void:
 			is_dragging = true
 			drag_source_id = clicked_id
 			drag_current_pos = pos
+			sfx_click.play()
 	else:
 		# Already have a click-selected building — send or deselect
 		if clicked_id == -1 or clicked_id == selected_building_id:
@@ -170,6 +283,7 @@ func _handle_left_release(pos: Vector2) -> void:
 	else:
 		# Released on same building or empty space — treat as click-select
 		selected_building_id = drag_source_id
+		sfx_click.play()
 	is_dragging = false
 	drag_source_id = -1
 
@@ -182,6 +296,7 @@ func _handle_right_click(pos: Vector2) -> void:
 			b["units"] -= 10
 			b["level"] += 1
 			b["max_capacity"] = 10 * b["level"]
+			sfx_upgrade.play()
 			selected_building_id = -1
 			return
 	selected_building_id = -1
@@ -216,6 +331,7 @@ func _send_units(source_id: int, target_id: int) -> void:
 	if send_count <= 0:
 		return
 	source["units"] -= send_count
+	sfx_whoosh.play()
 	unit_groups.append({
 		"count": send_count,
 		"source_id": source_id,
@@ -235,7 +351,18 @@ func _draw() -> void:
 	_draw_drag_line()
 	_draw_buildings()
 	_draw_unit_groups()
+	_draw_visual_effects()
 	_draw_hud()
+
+func _draw_visual_effects() -> void:
+	for fx in visual_effects:
+		if fx["type"] == "capture_pop":
+			var progress: float = fx["timer"] / fx["duration"]
+			var ring_radius: float = 20.0 + 40.0 * progress
+			var alpha: float = 1.0 - progress
+			var col: Color = fx["color"]
+			col.a = alpha * 0.8
+			draw_arc(fx["position"], ring_radius, 0, TAU, 48, col, 3.0 * (1.0 - progress * 0.5))
 
 func _draw_background() -> void:
 	draw_rect(Rect2(0, 0, 800, 600), Color(0.08, 0.08, 0.12))
@@ -259,10 +386,26 @@ func _draw_buildings() -> void:
 			fill_color = Color(0.4, 0.4, 0.4, 0.85)
 			outline_color = Color(0.6, 0.6, 0.6)
 
-		# Draw building circle
-		draw_circle(pos, radius, fill_color)
+		# Draw building background (dark)
+		draw_circle(pos, radius, Color(0.1, 0.1, 0.15))
+
+		# Draw capacity fill arc (from bottom, clockwise)
+		var max_cap: int = b["max_capacity"]
+		if max_cap > 0:
+			var fill_ratio: float = clampf(float(b["units"]) / max_cap, 0.0, 1.0)
+			if fill_ratio > 0.0:
+				var fill_angle: float = fill_ratio * TAU
+				# Start from bottom (PI/2), go clockwise
+				var start_angle: float = PI / 2.0
+				draw_arc(pos, radius * 0.6, start_angle - fill_angle, start_angle, 48, fill_color, radius * 0.8)
+
 		# Outline
 		draw_arc(pos, radius, 0, TAU, 48, outline_color, 2.0)
+
+		# Upgrade ready indicator — pulsing gold ring
+		if b["owner"] == "player" and b["level"] < 3 and b["units"] >= 10:
+			var pulse_alpha: float = 0.4 + 0.4 * sin(game_time * 4.0)
+			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.85, 0.2, pulse_alpha), 2.0)
 
 		# Selection highlight
 		if b["id"] == selected_building_id:
@@ -303,7 +446,9 @@ func _draw_unit_groups() -> void:
 	for g in unit_groups:
 		var start: Vector2 = g["start_pos"]
 		var end_p: Vector2 = g["end_pos"]
-		var current: Vector2 = start.lerp(end_p, g["progress"])
+		var t: float = g["progress"]
+		var eased_t: float = 1.0 - pow(1.0 - t, 3.0)
+		var current: Vector2 = start.lerp(end_p, eased_t)
 		# Draw group dot
 		draw_circle(current, 6.0, Color(0.3, 0.5, 1.0, 0.9))
 		# Draw count
