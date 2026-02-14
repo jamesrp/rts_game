@@ -224,7 +224,35 @@ func _get_neutral_level(level: int) -> Dictionary:
 	for fi in forges:
 		if fi < positions.size():
 			valid_forges.append(fi)
-	return {"positions": positions, "units": neutral_units, "player_indices": [0], "opponent_indices": [], "forges": valid_forges}
+
+	# Assign varied levels to neutral buildings based on conquest level
+	# Distribution: 40% level 1, 30% level 2, 20% level 3, 10% level 4
+	# Only conquest level N allows neutrals up to building level N
+	var upgrades: Dictionary = {}
+	var neutral_indices: Array = []
+	for i in range(positions.size()):
+		if i != 0 and i not in valid_forges:  # skip player start and forges
+			neutral_indices.append(i)
+	neutral_indices.shuffle()
+	var n: int = neutral_indices.size()
+	# Cumulative thresholds: first 40% stay level 1, next 30% level 2, etc.
+	var idx: int = 0
+	var thresholds: Array = [0.4, 0.7, 0.9, 1.0]
+	var bld_levels: Array = [1, 2, 3, 4]
+	for ni in neutral_indices:
+		var pct: float = float(idx) / float(n) if n > 0 else 0.0
+		var assigned_level: int = 1
+		for t in range(thresholds.size()):
+			if pct < thresholds[t]:
+				assigned_level = bld_levels[t]
+				break
+		# Cap building level by conquest level
+		assigned_level = mini(assigned_level, level)
+		if assigned_level > 1:
+			upgrades[ni] = assigned_level
+		idx += 1
+
+	return {"positions": positions, "units": neutral_units, "player_indices": [0], "opponent_indices": [], "forges": valid_forges, "upgrades": upgrades}
 
 func _get_ai_level(level: int) -> Dictionary:
 	if level == 1:
@@ -397,8 +425,6 @@ func _update_visual_effects(delta: float) -> void:
 
 func _update_unit_generation(delta: float) -> void:
 	for b in buildings:
-		if b["owner"] == "neutral":
-			continue
 		if b["type"] == "forge":
 			continue
 		var level: int = b["level"]
