@@ -32,11 +32,11 @@ You only need to re-export when you change the game code (see below).
 1. Edit files in this directory (e.g. `main.gd`, add new scenes)
 2. Re-export for web:
    ```bash
-   godot --headless --path /home/sprite/game --export-release "Web" build/index.html
+   cd /home/sprite/rts_game/game && godot --headless --export-release "Web" build/index.html
    ```
 3. Refresh your browser — the HTTP server serves the new files automatically
 
-The export step compiles your GDScript and packs resources into `build/`. Without re-exporting, code changes won't be reflected in the browser.
+The export step compiles your GDScript and packs resources into `build/index.pck`. Without re-exporting, code changes won't be reflected in the browser.
 
 ## Notes
 
