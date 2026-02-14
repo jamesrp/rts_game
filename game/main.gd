@@ -5,6 +5,8 @@ var game_state: String = "level_select"  # "level_select" or "playing"
 var current_mode: String = ""  # "neutral" or "ai"
 var current_level: int = 0
 
+const MAX_BUILDING_LEVEL: int = 4
+
 # === Building Data ===
 var buildings: Array = []
 # Each building: {id, position, owner, units, level, max_capacity, gen_timer}
@@ -185,7 +187,7 @@ func _get_neutral_level(level: int) -> Dictionary:
 		Vector2(400, 280),
 		Vector2(700, 550),
 	]
-	var neutral_units: Array = [0, 8, 12, 10, 15, 7, 5, 10, 12]
+	var neutral_units: Array = [5, 8, 12, 10, 15, 7, 5, 10, 12]
 
 	# Extra buildings for higher levels
 	var extra_positions: Array = [
@@ -559,7 +561,7 @@ func _ai_general(ai_buildings: Array) -> void:
 	# Phase 2: Upgrade — get buildings to level 3 before pushing
 	var upgradable: int = 0
 	for b in ai_buildings:
-		if b["level"] < 4:
+		if b["level"] < MAX_BUILDING_LEVEL:
 			upgradable += 1
 	if upgradable > 0 and randf() < 0.5:
 		if _ai_do_upgrade(ai_buildings):
@@ -593,7 +595,7 @@ func _ai_do_upgrade(ai_buildings: Array) -> bool:
 	var sorted: Array = _ai_sort_by_units(ai_buildings)
 	for b in sorted:
 		var cost: int = _get_upgrade_cost(b["level"])
-		if b["level"] < 4 and b["units"] >= cost:
+		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
 			b["level"] += 1
 			b["max_capacity"] = 20 * b["level"]
@@ -815,7 +817,7 @@ func _handle_right_click(pos: Vector2) -> void:
 	if clicked_id != -1 and buildings[clicked_id]["owner"] == "player":
 		var b: Dictionary = buildings[clicked_id]
 		var cost: int = _get_upgrade_cost(b["level"])
-		if b["level"] < 4 and b["units"] >= cost:
+		if b["level"] < MAX_BUILDING_LEVEL and b["units"] >= cost:
 			b["units"] -= cost
 			b["level"] += 1
 			b["max_capacity"] = 20 * b["level"]
@@ -985,7 +987,7 @@ func _draw_buildings() -> void:
 		draw_arc(pos, radius, 0, TAU, 48, outline_color, 2.0)
 
 		# Upgrade ready indicator — pulsing gold ring (player only)
-		if b["owner"] == "player" and b["level"] < 4 and b["units"] >= _get_upgrade_cost(b["level"]):
+		if b["owner"] == "player" and b["level"] < MAX_BUILDING_LEVEL and b["units"] >= _get_upgrade_cost(b["level"]):
 			var pulse_alpha: float = 0.4 + 0.4 * sin(game_time * 4.0)
 			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.85, 0.2, pulse_alpha), 2.0)
 
@@ -995,7 +997,7 @@ func _draw_buildings() -> void:
 
 		# Level indicator — small dots around the building
 		for lv in range(b["level"]):
-			var angle: float = -PI / 2 + lv * (TAU / 3.0)
+			var angle: float = -PI / 2 + lv * (TAU / MAX_BUILDING_LEVEL)
 			var dot_pos: Vector2 = pos + Vector2(cos(angle), sin(angle)) * (radius + 10)
 			draw_circle(dot_pos, 3.0, Color.WHITE)
 
