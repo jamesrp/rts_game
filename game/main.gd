@@ -166,13 +166,13 @@ func _get_neutral_level(level: int) -> Dictionary:
 	var positions: Array = [
 		Vector2(120, 300),   # Player start
 		Vector2(300, 100),
-		Vector2(500, 80),
+		Vector2(500, 90),
 		Vector2(680, 200),
 		Vector2(650, 420),
 		Vector2(450, 500),
 		Vector2(250, 480),
 		Vector2(400, 280),
-		Vector2(700, 550),
+		Vector2(700, 530),
 	]
 	var neutral_units: Array = [5, 8, 12, 10, 15, 7, 5, 10, 12]
 
@@ -181,9 +181,9 @@ func _get_neutral_level(level: int) -> Dictionary:
 		Vector2(160, 140),
 		Vector2(560, 300),
 		Vector2(340, 380),
-		Vector2(750, 100),
+		Vector2(730, 100),
 		Vector2(100, 500),
-		Vector2(550, 550),
+		Vector2(550, 530),
 		Vector2(200, 200),
 		Vector2(720, 340),
 		Vector2(400, 140),
@@ -1344,6 +1344,7 @@ func _draw_buildings() -> void:
 		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
 		draw_string(font, pos - Vector2(text_size.x / 2, -5),
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+
 
 func _draw_building_shape(b: Dictionary, pos: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
 	if b["type"] == "tower":
