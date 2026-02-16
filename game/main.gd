@@ -50,6 +50,16 @@ var visual_effects: Array = []
 # === AI State ===
 var ai_timer: float = 0.0
 
+# === Roguelike Run State ===
+var in_roguelike_run: bool = false
+var run_hp: int = 100
+var run_max_hp: int = 100
+var run_act: int = 1
+var run_map: Array = []  # Array of rows, each row is array of node dicts
+var run_current_row: int = 0
+var run_last_node: int = -1  # Column index chosen in current row
+var run_overlay: String = ""  # "", "run_over", "run_won"
+
 # === Level Select UI ===
 var level_buttons: Array = []
 # Each: {rect: Rect2, mode: String, level: int, label: String}
@@ -92,6 +102,14 @@ func _build_level_select_buttons() -> void:
 			"level": i + 1,
 			"label": ai_labels[i],
 		})
+
+	# Roguelike button (centered below both columns)
+	level_buttons.append({
+		"rect": Rect2(cx - 120, start_y + 4 * (btn_h + gap) + 30, 240, 52),
+		"mode": "roguelike",
+		"level": 0,
+		"label": "Start Run",
+	})
 
 func _create_sfx(duration_sec: float, generator: Callable) -> AudioStreamPlayer:
 	var sample_rate := 22050
@@ -157,6 +175,283 @@ func _init_sounds() -> void:
 			var val := (sin(TAU * 600.0 * t) + 0.2 * sin(TAU * 1200.0 * t)) * env * 0.6
 			data[i] = int((val * 0.5 + 0.5) * 255.0)
 	)
+
+# === Roguelike Run ===
+
+func _start_roguelike_run() -> void:
+	run_hp = 100
+	run_max_hp = 100
+	run_act = 1
+	run_current_row = 0
+	run_last_node = -1
+	run_overlay = ""
+	run_map = _generate_run_map(run_act)
+	game_state = "roguelike_map"
+
+func _generate_run_map(act: int) -> Array:
+	var map: Array = []
+	var row_counts: Array = [3, 3, 4, 3, 1]
+
+	for row_idx in range(row_counts.size()):
+		var row: Array = []
+		var count: int = row_counts[row_idx]
+		for col_idx in range(count):
+			var node_type: String
+			if row_idx == row_counts.size() - 1:
+				node_type = "boss"
+			else:
+				node_type = "battle"
+			var x: float = _get_map_node_x(col_idx, count)
+			var y: float = 500.0 - row_idx * 95.0
+			row.append({
+				"type": node_type,
+				"completed": false,
+				"position": Vector2(x, y),
+				"next_edges": [],
+			})
+		map.append(row)
+
+	# Generate edges between adjacent rows
+	for row_idx in range(map.size() - 1):
+		var cur_row: Array = map[row_idx]
+		var nxt_row: Array = map[row_idx + 1]
+		var incoming: Array = []
+		incoming.resize(nxt_row.size())
+		for i in range(nxt_row.size()):
+			incoming[i] = false
+
+		for col_idx in range(cur_row.size()):
+			# Natural mapping based on position ratio
+			var natural: int = int(float(col_idx) / float(cur_row.size()) * float(nxt_row.size()))
+			natural = clampi(natural, 0, nxt_row.size() - 1)
+			cur_row[col_idx]["next_edges"].append(natural)
+			incoming[natural] = true
+			# 50% chance to also connect to an adjacent node
+			if randf() < 0.5:
+				var alt: int = natural + (1 if randf() < 0.5 else -1)
+				alt = clampi(alt, 0, nxt_row.size() - 1)
+				if alt != natural and alt not in cur_row[col_idx]["next_edges"]:
+					cur_row[col_idx]["next_edges"].append(alt)
+					incoming[alt] = true
+
+		# Ensure every next-row node has at least one incoming edge
+		for i in range(nxt_row.size()):
+			if not incoming[i]:
+				var closest: int = clampi(int(float(i) / float(nxt_row.size()) * float(cur_row.size())), 0, cur_row.size() - 1)
+				if i not in cur_row[closest]["next_edges"]:
+					cur_row[closest]["next_edges"].append(i)
+
+	return map
+
+func _get_map_node_x(col: int, total: int) -> float:
+	if total == 1:
+		return 400.0
+	var margin: float = 150.0
+	var spacing: float = (800.0 - 2.0 * margin) / float(total - 1)
+	return margin + col * spacing
+
+func _is_node_available(row: int, col: int) -> bool:
+	if row != run_current_row:
+		return false
+	if run_map[row][col]["completed"]:
+		return false
+	if run_current_row == 0:
+		return true
+	# Check if any completed node in previous row connects here
+	for prev_col in range(run_map[run_current_row - 1].size()):
+		var prev_node: Dictionary = run_map[run_current_row - 1][prev_col]
+		if prev_node["completed"] and col in prev_node["next_edges"]:
+			return true
+	return false
+
+func _start_roguelike_battle(col: int) -> void:
+	run_last_node = col
+	var ai_level: int
+	if run_map[run_current_row][col]["type"] == "boss":
+		ai_level = clampi(run_act + 1, 2, 4)
+	else:
+		match run_act:
+			1: ai_level = 1 + (randi() % 2)
+			2: ai_level = 2 + (randi() % 2)
+			_: ai_level = 3 + (randi() % 2)
+		ai_level = clampi(ai_level, 1, 4)
+	_start_level("ai", ai_level)
+	in_roguelike_run = true
+
+func _return_from_roguelike_battle() -> void:
+	var won: bool = game_won
+	# Clean up battle state
+	buildings.clear()
+	unit_groups.clear()
+	visual_effects.clear()
+	context_menu_building_id = -1
+	context_menu_options.clear()
+	in_roguelike_run = false
+
+	if won:
+		run_map[run_current_row][run_last_node]["completed"] = true
+		var is_boss: bool = run_map[run_current_row][run_last_node]["type"] == "boss"
+		if is_boss:
+			if run_act >= 3:
+				run_overlay = "run_won"
+				game_state = "roguelike_map"
+			else:
+				run_act += 1
+				run_map = _generate_run_map(run_act)
+				run_current_row = 0
+				run_last_node = -1
+				game_state = "roguelike_map"
+		else:
+			run_current_row += 1
+			game_state = "roguelike_map"
+	else:
+		# Lost: take HP damage, still advance
+		run_hp -= 25
+		run_map[run_current_row][run_last_node]["completed"] = true
+		if run_hp <= 0:
+			run_hp = 0
+			run_overlay = "run_over"
+			game_state = "roguelike_map"
+		else:
+			run_current_row += 1
+			game_state = "roguelike_map"
+
+func _abandon_roguelike_run() -> void:
+	game_state = "level_select"
+	run_map.clear()
+
+func _input_roguelike_map(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			if run_overlay == "":
+				_abandon_roguelike_run()
+		return
+
+	# If overlay is showing, click dismisses it
+	if run_overlay == "run_over" or run_overlay == "run_won":
+		game_state = "level_select"
+		run_map.clear()
+		run_overlay = ""
+		return
+
+	# Check node clicks
+	if run_current_row >= run_map.size():
+		return
+	for col_idx in range(run_map[run_current_row].size()):
+		var node: Dictionary = run_map[run_current_row][col_idx]
+		if node["position"].distance_to(event.position) <= 22.0 and _is_node_available(run_current_row, col_idx):
+			sfx_click.play()
+			_start_roguelike_battle(col_idx)
+			return
+
+func _draw_roguelike_map() -> void:
+	_draw_background()
+	var font := ThemeDB.fallback_font
+
+	# Title
+	var title := "ACT %d" % run_act
+	var title_size := font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
+	draw_string(font, Vector2(400 - title_size.x / 2, 40), title,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.9, 0.85, 0.6))
+
+	# HP bar
+	var hp_text := "HP: %d / %d" % [run_hp, run_max_hp]
+	draw_string(font, Vector2(620, 40), hp_text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.3, 0.3))
+	var bar_x: float = 620.0
+	var bar_y: float = 48.0
+	var bar_w: float = 150.0
+	var bar_h: float = 12.0
+	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.2, 0.1, 0.1))
+	var fill_w: float = bar_w * float(run_hp) / float(run_max_hp)
+	draw_rect(Rect2(bar_x, bar_y, fill_w, bar_h), Color(0.8, 0.2, 0.2))
+	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.5, 0.2, 0.2), false, 1.0)
+
+	# Draw edges
+	for row_idx in range(run_map.size() - 1):
+		for col_idx in range(run_map[row_idx].size()):
+			var node: Dictionary = run_map[row_idx][col_idx]
+			for next_col in node["next_edges"]:
+				var next_node: Dictionary = run_map[row_idx + 1][next_col]
+				var edge_color := Color(0.3, 0.3, 0.4)
+				if node["completed"]:
+					# Highlight the path taken
+					if run_map[row_idx + 1][next_col]["completed"]:
+						edge_color = Color(0.3, 0.5, 0.3, 0.7)
+					else:
+						edge_color = Color(0.25, 0.25, 0.3)
+				elif row_idx == run_current_row and _is_node_available(row_idx, col_idx):
+					edge_color = Color(0.4, 0.5, 0.7, 0.5)
+				draw_line(node["position"], next_node["position"], edge_color, 2.0)
+
+	# Draw nodes
+	for row_idx in range(run_map.size()):
+		for col_idx in range(run_map[row_idx].size()):
+			var node: Dictionary = run_map[row_idx][col_idx]
+			var pos: Vector2 = node["position"]
+			var available: bool = _is_node_available(row_idx, col_idx)
+
+			if node["completed"]:
+				draw_circle(pos, 14.0, Color(0.2, 0.2, 0.25))
+				draw_arc(pos, 14.0, 0, TAU, 32, Color(0.3, 0.3, 0.35), 2.0)
+				draw_line(pos + Vector2(-5, 0), pos + Vector2(-1, 4), Color(0.4, 0.6, 0.4), 2.0)
+				draw_line(pos + Vector2(-1, 4), pos + Vector2(5, -4), Color(0.4, 0.6, 0.4), 2.0)
+			elif node["type"] == "boss":
+				var boss_col := Color(0.9, 0.3, 0.2) if available else Color(0.5, 0.2, 0.15)
+				draw_circle(pos, 18.0, Color(0.15, 0.05, 0.05))
+				draw_arc(pos, 18.0, 0, TAU, 32, boss_col, 2.5)
+				# Skull-like icon: eyes and mouth
+				draw_circle(pos + Vector2(-4, -3), 2.0, boss_col)
+				draw_circle(pos + Vector2(4, -3), 2.0, boss_col)
+				draw_line(pos + Vector2(-3, 4), pos + Vector2(3, 4), boss_col, 1.5)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(game_time * 3.0)
+					draw_arc(pos, 22.0, 0, TAU, 32, Color(0.9, 0.3, 0.2, pulse), 2.0)
+			elif available:
+				var pulse: float = 0.6 + 0.3 * sin(game_time * 3.0)
+				draw_circle(pos, 14.0, Color(0.15, 0.2, 0.35))
+				draw_arc(pos, 14.0, 0, TAU, 32, Color(0.4, 0.6, 1.0, pulse), 2.5)
+				# Crossed swords icon
+				draw_line(pos + Vector2(-5, -5), pos + Vector2(5, 5), Color(0.7, 0.8, 1.0), 2.0)
+				draw_line(pos + Vector2(5, -5), pos + Vector2(-5, 5), Color(0.7, 0.8, 1.0), 2.0)
+			else:
+				draw_circle(pos, 12.0, Color(0.12, 0.12, 0.16))
+				draw_arc(pos, 12.0, 0, TAU, 32, Color(0.25, 0.25, 0.3), 1.5)
+
+	# Row labels
+	var row_labels: Array = ["I", "II", "III", "IV", "BOSS"]
+	for row_idx in range(run_map.size()):
+		var y: float = run_map[row_idx][0]["position"].y + 5
+		var lbl: String = row_labels[row_idx] if row_idx < row_labels.size() else str(row_idx + 1)
+		draw_string(font, Vector2(30, y), lbl,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.35, 0.35, 0.4))
+
+	# Instructions
+	var help := "Click a glowing node to battle  |  ESC to abandon run"
+	draw_string(font, Vector2(10, 590), help,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.5, 0.5, 0.55))
+
+	# Overlays
+	if run_overlay == "run_over":
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.6))
+		var msg := "RUN OVER"
+		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
+		draw_string(font, Vector2(400 - msg_size.x / 2, 270), msg,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color(1.0, 0.3, 0.3))
+		var sub := "Reached Act %d  |  Click to return" % run_act
+		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+		draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.7, 0.5, 0.5))
+	elif run_overlay == "run_won":
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.6))
+		var msg := "VICTORY!"
+		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
+		draw_string(font, Vector2(400 - msg_size.x / 2, 270), msg,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color(1.0, 0.85, 0.2))
+		var sub := "All 3 acts completed!  |  Click to return"
+		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+		draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.8, 0.75, 0.5))
 
 # === Level Configurations ===
 
@@ -404,6 +699,10 @@ func _return_to_menu() -> void:
 
 func _process(delta: float) -> void:
 	if game_state == "level_select":
+		queue_redraw()
+		return
+	if game_state == "roguelike_map":
+		game_time += delta
 		queue_redraw()
 		return
 
@@ -1020,10 +1319,16 @@ func _input(event: InputEvent) -> void:
 	if game_state == "level_select":
 		_input_level_select(event)
 		return
+	if game_state == "roguelike_map":
+		_input_roguelike_map(event)
+		return
 
 	if game_won or game_lost:
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			_return_to_menu()
+			if in_roguelike_run:
+				_return_from_roguelike_battle()
+			else:
+				_return_to_menu()
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -1041,7 +1346,10 @@ func _input_level_select(event: InputEvent) -> void:
 		for btn in level_buttons:
 			if btn["rect"].has_point(event.position):
 				sfx_click.play()
-				_start_level(btn["mode"], btn["level"])
+				if btn["mode"] == "roguelike":
+					_start_roguelike_run()
+				else:
+					_start_level(btn["mode"], btn["level"])
 				return
 
 func _handle_left_press(pos: Vector2) -> void:
@@ -1169,6 +1477,9 @@ func _draw() -> void:
 	if game_state == "level_select":
 		_draw_level_select()
 		return
+	if game_state == "roguelike_map":
+		_draw_roguelike_map()
+		return
 	_draw_background()
 	_draw_unit_group_lines()
 	_draw_drag_line()
@@ -1216,22 +1527,40 @@ func _draw_level_select() -> void:
 	draw_string(font, Vector2(right_x + (btn_w - sa_size.x) / 2, 165), sub_ai,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 0.45, 0.3))
 
+	# Roguelike header (centered below both columns)
+	var header_rl := "ROGUELIKE"
+	var hr_size := font.get_string_size(header_rl, HORIZONTAL_ALIGNMENT_CENTER, -1, 20)
+	var rl_header_y: float = 180.0 + 4.0 * (48.0 + 12.0) + 16.0
+	draw_string(font, Vector2(400 - hr_size.x / 2, rl_header_y), header_rl,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.4, 0.9, 0.5))
+
 	# Buttons
 	for btn in level_buttons:
 		var r: Rect2 = btn["rect"]
+		var is_roguelike: bool = btn["mode"] == "roguelike"
 		var is_ai: bool = btn["mode"] == "ai"
 		var bg_color := Color(0.15, 0.15, 0.22)
-		var border_color := Color(0.3, 0.4, 0.7) if not is_ai else Color(0.7, 0.45, 0.2)
-		var text_color := Color(0.8, 0.85, 1.0) if not is_ai else Color(1.0, 0.75, 0.4)
+		var border_color: Color
+		var text_color: Color
+		if is_roguelike:
+			border_color = Color(0.3, 0.7, 0.4)
+			text_color = Color(0.6, 1.0, 0.7)
+		elif is_ai:
+			border_color = Color(0.7, 0.45, 0.2)
+			text_color = Color(1.0, 0.75, 0.4)
+		else:
+			border_color = Color(0.3, 0.4, 0.7)
+			text_color = Color(0.8, 0.85, 1.0)
 
 		draw_rect(r, bg_color)
 		draw_rect(r, border_color, false, 2.0)
 
 		var label: String = btn["label"]
-		var label_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+		var font_size: int = 20 if is_roguelike else 18
+		var label_size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 		draw_string(font, Vector2(r.position.x + (r.size.x - label_size.x) / 2,
 			r.position.y + (r.size.y + label_size.y) / 2 - 2), label,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, text_color)
+			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, text_color)
 
 func _draw_visual_effects() -> void:
 	for fx in visual_effects:
@@ -1517,6 +1846,20 @@ func _draw_hud() -> void:
 		var hud_text: String = "You: %d  |  Neutral: %d  |  AI: %d" % [player_count, neutral_count, opponent_count]
 		draw_string(font, Vector2(10, 24), hud_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.9, 0.9))
+
+	# Run HP bar during roguelike battles
+	if in_roguelike_run:
+		var rbar_x: float = 620.0
+		var rbar_y: float = 8.0
+		var rbar_w: float = 150.0
+		var rbar_h: float = 14.0
+		draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.2, 0.1, 0.1))
+		var rfill: float = rbar_w * float(run_hp) / float(run_max_hp)
+		draw_rect(Rect2(rbar_x, rbar_y, rfill, rbar_h), Color(0.8, 0.2, 0.2))
+		draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.5, 0.2, 0.2), false, 1.0)
+		var rhp_text := "Run HP: %d" % run_hp
+		draw_string(font, Vector2(rbar_x + 4, rbar_y + 11), rhp_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.8, 0.8))
 
 	# Instructions
 	var help_text: String = "Click: menu  |  Right-click: quick upgrade  |  Drag: send  |  Forges: +10% str  |  Towers: shoot enemies"
