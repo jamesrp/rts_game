@@ -212,6 +212,19 @@ func _generate_run_map(act: int) -> Array:
 			})
 		map.append(row)
 
+	# Assign 1-2 elite nodes in middle rows (rows 1-2, i.e. map rows II-III)
+	var elite_candidates: Array = []  # [row_idx, col_idx] pairs
+	for row_idx in [1, 2]:
+		if row_idx < map.size():
+			for col_idx in range(map[row_idx].size()):
+				if map[row_idx][col_idx]["type"] == "battle":
+					elite_candidates.append([row_idx, col_idx])
+	elite_candidates.shuffle()
+	var elite_count: int = 1 + (randi() % 2)  # 1 or 2
+	for i in range(mini(elite_count, elite_candidates.size())):
+		var rc: Array = elite_candidates[i]
+		map[rc[0]][rc[1]]["type"] = "elite"
+
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
 		var cur_row: Array = map[row_idx]
@@ -267,17 +280,24 @@ func _is_node_available(row: int, col: int) -> bool:
 
 func _start_roguelike_battle(col: int) -> void:
 	run_last_node = col
+	var node_type: String = run_map[run_current_row][col]["type"]
+	var is_elite: bool = node_type == "elite"
 	var ai_level: int
-	if run_map[run_current_row][col]["type"] == "boss":
+	if node_type == "boss":
 		ai_level = clampi(run_act + 1, 2, 4)
 	else:
 		match run_act:
 			1: ai_level = 1 + (randi() % 2)
 			2: ai_level = 2 + (randi() % 2)
 			_: ai_level = 3 + (randi() % 2)
+		# Later rows within an act push toward higher difficulty
+		ai_level += run_current_row / 2
+		if is_elite:
+			ai_level += 1
 		ai_level = clampi(ai_level, 1, 4)
 	in_roguelike_run = true
-	_start_level("ai", ai_level)
+	var config: Dictionary = _generate_roguelike_battle_map(ai_level, is_elite)
+	_start_level("ai", ai_level, config)
 
 func _return_from_roguelike_battle() -> void:
 	var won: bool = game_won
@@ -403,6 +423,20 @@ func _draw_roguelike_map() -> void:
 				if available:
 					var pulse: float = 0.4 + 0.4 * sin(game_time * 3.0)
 					draw_arc(pos, 22.0, 0, TAU, 32, Color(0.9, 0.3, 0.2, pulse), 2.0)
+			elif node["type"] == "elite":
+				var elite_col := Color(1.0, 0.85, 0.2) if available else Color(0.6, 0.5, 0.15)
+				draw_circle(pos, 16.0, Color(0.15, 0.12, 0.02))
+				draw_arc(pos, 16.0, 0, TAU, 32, elite_col, 2.5)
+				# Star icon (5-pointed)
+				for si in range(5):
+					var angle_a: float = -PI / 2.0 + si * TAU / 5.0
+					var angle_b: float = -PI / 2.0 + (si + 2) * TAU / 5.0
+					var pa: Vector2 = pos + Vector2(cos(angle_a), sin(angle_a)) * 8.0
+					var pb: Vector2 = pos + Vector2(cos(angle_b), sin(angle_b)) * 8.0
+					draw_line(pa, pb, elite_col, 1.5)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(game_time * 3.0)
+					draw_arc(pos, 20.0, 0, TAU, 32, Color(1.0, 0.85, 0.2, pulse), 2.0)
 			elif available:
 				var pulse: float = 0.6 + 0.3 * sin(game_time * 3.0)
 				draw_circle(pos, 14.0, Color(0.15, 0.2, 0.35))
@@ -624,7 +658,180 @@ func _get_ai_level(level: int) -> Dictionary:
 		return {"positions": positions, "units": units, "player_indices": [0], "opponent_indices": [1, 2],
 			"upgrades": {2: 2}, "forges": [4, 8, 11, 13], "towers": [5, 9]}  # Building index 2 starts at level 2
 
-func _start_level(mode: String, level: int) -> void:
+func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary:
+	var node_count: int = randi_range(10, 14) + ai_level
+	if is_elite:
+		node_count += 2
+	node_count = mini(node_count, 18)
+
+	# Pick a layout strategy
+	var strategies: Array = ["corridor", "ring", "clusters", "scattered"]
+	var strategy: String = strategies[randi() % strategies.size()]
+
+	var positions: Array = []
+	var min_spacing: float = 80.0
+
+	match strategy:
+		"corridor":
+			positions = _gen_corridor_layout(node_count, min_spacing)
+		"ring":
+			positions = _gen_ring_layout(node_count, min_spacing)
+		"clusters":
+			positions = _gen_clusters_layout(node_count, min_spacing)
+		_:
+			positions = _gen_scattered_layout(node_count, min_spacing)
+
+	# Sort by distance from bottom-left — index 0 = player, last = opponent area
+	positions.sort_custom(func(a: Vector2, b: Vector2) -> bool:
+		return a.distance_to(Vector2(50, 550)) < b.distance_to(Vector2(50, 550))
+	)
+
+	# Player is index 0 (closest to bottom-left)
+	var player_indices: Array = [0]
+	# Opponent is the farthest from bottom-left (last index)
+	var opponent_indices: Array = [positions.size() - 1]
+
+	# More opponent starting buildings for higher ai_level
+	if ai_level >= 3 and positions.size() > 4:
+		# Find second-farthest from bottom-left for second opponent base
+		opponent_indices.append(positions.size() - 2)
+
+	# Elite: add another opponent starting building
+	if is_elite and positions.size() > 5:
+		var next_opp: int = positions.size() - opponent_indices.size() - 1
+		if next_opp > 0 and next_opp not in opponent_indices and next_opp not in player_indices:
+			opponent_indices.append(next_opp)
+
+	# Assign units
+	var units: Array = []
+	for i in range(positions.size()):
+		if i in player_indices:
+			units.append(20)
+		elif i in opponent_indices:
+			units.append(15 + ai_level * 2)
+		else:
+			units.append(randi_range(5, 15))
+
+	# Assign forges (2-3 among neutral positions)
+	var neutral_indices: Array = []
+	for i in range(positions.size()):
+		if i not in player_indices and i not in opponent_indices:
+			neutral_indices.append(i)
+	neutral_indices.shuffle()
+	var forge_count: int = randi_range(2, 3)
+	var forges: Array = []
+	for i in range(mini(forge_count, neutral_indices.size())):
+		forges.append(neutral_indices[i])
+
+	# Assign towers (1-2 among remaining neutrals)
+	var remaining_neutrals: Array = []
+	for i in neutral_indices:
+		if i not in forges:
+			remaining_neutrals.append(i)
+	remaining_neutrals.shuffle()
+	var tower_count: int = randi_range(1, 2)
+	var towers: Array = []
+	for i in range(mini(tower_count, remaining_neutrals.size())):
+		towers.append(remaining_neutrals[i])
+
+	# Elite modifier: pre-upgrade some enemy buildings
+	var upgrades: Dictionary = {}
+	if is_elite:
+		for oi in opponent_indices:
+			if oi != opponent_indices[0]:
+				upgrades[oi] = 2
+
+	return {"positions": positions, "units": units, "player_indices": player_indices,
+		"opponent_indices": opponent_indices, "forges": forges, "towers": towers, "upgrades": upgrades}
+
+func _try_place_building(positions: Array, pos: Vector2, min_spacing: float) -> bool:
+	# Clamp to playable area
+	pos.x = clampf(pos.x, 60.0, 740.0)
+	pos.y = clampf(pos.y, 60.0, 540.0)
+	for existing in positions:
+		if existing.distance_to(pos) < min_spacing:
+			return false
+	positions.append(pos)
+	return true
+
+func _gen_corridor_layout(count: int, min_spacing: float) -> Array:
+	var positions: Array = []
+	# Player bottom-left, opponent top-right, diagonal corridor with branches
+	positions.append(Vector2(100, 480))  # Player
+	positions.append(Vector2(700, 120))  # Opponent
+	var attempts: int = 0
+	while positions.size() < count and attempts < 200:
+		attempts += 1
+		# Points along diagonal with random offset
+		var t: float = randf()
+		var base_x: float = lerpf(100.0, 700.0, t)
+		var base_y: float = lerpf(480.0, 120.0, t)
+		var offset_x: float = randf_range(-120.0, 120.0)
+		var offset_y: float = randf_range(-80.0, 80.0)
+		var pos := Vector2(base_x + offset_x, base_y + offset_y)
+		_try_place_building(positions, pos, min_spacing)
+	return positions
+
+func _gen_ring_layout(count: int, min_spacing: float) -> Array:
+	var positions: Array = []
+	positions.append(Vector2(120, 460))  # Player
+	positions.append(Vector2(680, 140))  # Opponent
+	var center := Vector2(400, 300)
+	# Place buildings in an oval ring
+	var ring_count: int = mini(count - 2, 10)
+	for i in range(ring_count):
+		var angle: float = TAU * float(i) / float(ring_count)
+		var rx: float = 250.0 + randf_range(-30.0, 30.0)
+		var ry: float = 170.0 + randf_range(-20.0, 20.0)
+		var pos := center + Vector2(cos(angle) * rx, sin(angle) * ry)
+		_try_place_building(positions, pos, min_spacing)
+	# Fill remaining with center-area buildings
+	var attempts: int = 0
+	while positions.size() < count and attempts < 100:
+		attempts += 1
+		var pos := center + Vector2(randf_range(-80.0, 80.0), randf_range(-60.0, 60.0))
+		_try_place_building(positions, pos, min_spacing)
+	return positions
+
+func _gen_clusters_layout(count: int, min_spacing: float) -> Array:
+	var positions: Array = []
+	positions.append(Vector2(110, 470))  # Player
+	positions.append(Vector2(690, 130))  # Opponent
+	# Player-side cluster
+	var player_center := Vector2(200, 400)
+	var opp_center := Vector2(600, 200)
+	var mid_center := Vector2(400, 300)
+	var per_cluster: int = (count - 2) / 3
+	var centers: Array = [player_center, opp_center, mid_center]
+	for ci in range(3):
+		var c: Vector2 = centers[ci]
+		var to_place: int = per_cluster if ci < 2 else (count - positions.size())
+		var attempts: int = 0
+		while to_place > 0 and attempts < 80:
+			attempts += 1
+			var pos := c + Vector2(randf_range(-100.0, 100.0), randf_range(-80.0, 80.0))
+			if _try_place_building(positions, pos, min_spacing):
+				to_place -= 1
+	# Fill any remaining
+	var attempts: int = 0
+	while positions.size() < count and attempts < 100:
+		attempts += 1
+		var pos := Vector2(randf_range(80.0, 720.0), randf_range(80.0, 520.0))
+		_try_place_building(positions, pos, min_spacing)
+	return positions
+
+func _gen_scattered_layout(count: int, min_spacing: float) -> Array:
+	var positions: Array = []
+	positions.append(Vector2(100 + randf_range(0, 40), 460 + randf_range(-20, 20)))  # Player
+	positions.append(Vector2(680 + randf_range(-20, 20), 120 + randf_range(-20, 20)))  # Opponent
+	var attempts: int = 0
+	while positions.size() < count and attempts < 300:
+		attempts += 1
+		var pos := Vector2(randf_range(80.0, 720.0), randf_range(80.0, 520.0))
+		_try_place_building(positions, pos, min_spacing)
+	return positions
+
+func _start_level(mode: String, level: int, config_override: Dictionary = {}) -> void:
 	current_mode = mode
 	current_level = level
 	game_state = "playing"
@@ -643,7 +850,9 @@ func _start_level(mode: String, level: int) -> void:
 	context_menu_options.clear()
 
 	var config: Dictionary
-	if mode == "neutral":
+	if not config_override.is_empty():
+		config = config_override
+	elif mode == "neutral":
 		config = _get_neutral_level(level)
 	else:
 		config = _get_ai_level(level)
