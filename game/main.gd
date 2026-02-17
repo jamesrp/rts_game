@@ -59,6 +59,7 @@ var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
 var run_overlay: String = ""  # "", "run_over", "run_won"
+var home_base_id: int = -1
 
 # === Level Select UI ===
 var level_buttons: Array = []
@@ -275,8 +276,8 @@ func _start_roguelike_battle(col: int) -> void:
 			2: ai_level = 2 + (randi() % 2)
 			_: ai_level = 3 + (randi() % 2)
 		ai_level = clampi(ai_level, 1, 4)
-	_start_level("ai", ai_level)
 	in_roguelike_run = true
+	_start_level("ai", ai_level)
 
 func _return_from_roguelike_battle() -> void:
 	var won: bool = game_won
@@ -287,6 +288,7 @@ func _return_from_roguelike_battle() -> void:
 	context_menu_building_id = -1
 	context_menu_options.clear()
 	in_roguelike_run = false
+	home_base_id = -1
 
 	if won:
 		run_map[run_current_row][run_last_node]["completed"] = true
@@ -305,16 +307,10 @@ func _return_from_roguelike_battle() -> void:
 			run_current_row += 1
 			game_state = "roguelike_map"
 	else:
-		# Lost: take HP damage, still advance
-		run_hp -= 25
-		run_map[run_current_row][run_last_node]["completed"] = true
-		if run_hp <= 0:
-			run_hp = 0
-			run_overlay = "run_over"
-			game_state = "roguelike_map"
-		else:
-			run_current_row += 1
-			game_state = "roguelike_map"
+		# Lost the battle (home base captured) — run is over
+		run_hp = 0
+		run_overlay = "run_over"
+		game_state = "roguelike_map"
 
 func _abandon_roguelike_run() -> void:
 	game_state = "level_select"
@@ -687,6 +683,15 @@ func _start_level(mode: String, level: int) -> void:
 			"shoot_timer": 0.0,
 		})
 
+	# Set home base to rearmost player building in roguelike runs
+	if in_roguelike_run:
+		var best_y: float = -1.0
+		home_base_id = -1
+		for b in buildings:
+			if b["owner"] == "player" and b["position"].y > best_y:
+				best_y = b["position"].y
+				home_base_id = b["id"]
+
 func _return_to_menu() -> void:
 	game_state = "level_select"
 	buildings.clear()
@@ -694,6 +699,7 @@ func _return_to_menu() -> void:
 	visual_effects.clear()
 	context_menu_building_id = -1
 	context_menu_options.clear()
+	home_base_id = -1
 
 # === Main Loop ===
 
@@ -843,6 +849,11 @@ func _resolve_arrival(group: Dictionary) -> void:
 		if defender_remaining >= attacker_remaining:
 			# Defender holds
 			target["units"] = maxi(0, int(round(defender_remaining)))
+			# Home base took damage — drain run HP proportionally
+			if in_roguelike_run and target["id"] == home_base_id and target["owner"] == "player":
+				var units_lost: int = int(D) - target["units"]
+				if units_lost > 0:
+					run_hp = maxi(0, run_hp - clampi(units_lost / 2, 1, 50))
 		else:
 			# Attacker captures
 			target["units"] = maxi(1, int(round(attacker_remaining)))
@@ -861,6 +872,9 @@ func _resolve_arrival(group: Dictionary) -> void:
 				"duration": 0.4,
 				"color": _get_owner_color(group["owner"]),
 			})
+			# Home base captured — immediate battle loss
+			if in_roguelike_run and target["id"] == home_base_id:
+				game_lost = true
 
 func _get_owner_color(owner: String) -> Color:
 	if owner == "player":
@@ -1234,6 +1248,10 @@ func _check_win_condition() -> void:
 				has_opponent = true
 		if not has_opponent:
 			game_won = true
+		elif in_roguelike_run:
+			# In roguelike: lose only if home base is no longer player-owned
+			if home_base_id >= 0 and buildings[home_base_id]["owner"] != "player":
+				game_lost = true
 		elif not has_player:
 			game_lost = true
 
@@ -1605,6 +1623,13 @@ func _draw_buildings() -> void:
 
 		var is_forge: bool = b["type"] == "forge"
 		var is_tower: bool = b["type"] == "tower"
+
+		# Home base visual distinction: pulsing gold/white shield ring
+		if in_roguelike_run and b["id"] == home_base_id and b["owner"] == "player":
+			radius += 4.0
+			var shield_alpha: float = 0.5 + 0.3 * sin(game_time * 3.0)
+			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.9, 0.4, shield_alpha), 3.0)
+			draw_arc(pos, radius + 9, 0, TAU, 48, Color(1.0, 1.0, 1.0, shield_alpha * 0.4), 1.5)
 
 		_draw_building_shape(b, pos, radius, fill_color, outline_color)
 
