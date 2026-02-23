@@ -58,8 +58,7 @@ var ai_timer: float = 0.0
 
 # === Roguelike Run State ===
 var in_roguelike_run: bool = false
-var run_hp: int = 100
-var run_max_hp: int = 100
+var run_time_left: float = 600.0  # seconds; 10:00 starting total
 var run_act: int = 1
 var run_gold: int = 0
 var run_map: Array = []  # Array of rows, each row is array of node dicts
@@ -186,9 +185,14 @@ func _init_sounds() -> void:
 
 # === Roguelike Run ===
 
+func _format_run_time() -> String:
+	var total_sec: int = int(ceil(run_time_left))
+	var mins: int = total_sec / 60
+	var secs: int = total_sec % 60
+	return "%d:%02d" % [mins, secs]
+
 func _start_roguelike_run() -> void:
-	run_hp = 100
-	run_max_hp = 100
+	run_time_left = 600.0
 	run_act = 1
 	run_gold = 0
 	run_current_row = 0
@@ -354,8 +358,7 @@ func _return_from_roguelike_battle() -> void:
 			run_current_row += 1
 			game_state = "roguelike_map"
 	else:
-		# Lost the battle (home base captured) — run is over
-		run_hp = 0
+		# Lost the battle — run is over
 		run_overlay = "run_over"
 		game_state = "roguelike_map"
 
@@ -420,18 +423,25 @@ func _draw_roguelike_map() -> void:
 	draw_string(font, Vector2(30, 40), gold_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
 
-	# HP bar
-	var hp_text := "HP: %d / %d" % [run_hp, run_max_hp]
-	draw_string(font, Vector2(620, 40), hp_text,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.3, 0.3))
-	var bar_x: float = 620.0
-	var bar_y: float = 48.0
-	var bar_w: float = 150.0
-	var bar_h: float = 12.0
-	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.2, 0.1, 0.1))
-	var fill_w: float = bar_w * float(run_hp) / float(run_max_hp)
-	draw_rect(Rect2(bar_x, bar_y, fill_w, bar_h), Color(0.8, 0.2, 0.2))
-	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.5, 0.2, 0.2), false, 1.0)
+	# Run time display (top-right)
+	var time_str := _format_run_time()
+	var time_col := Color(0.9, 0.9, 0.9)
+	if run_time_left < 30.0:
+		time_col = Color(1.0, 0.3, 0.3) if int(game_time * 2.0) % 2 == 0 else Color(0.8, 0.15, 0.15)
+	elif run_time_left < 60.0:
+		time_col = Color(1.0, 0.65, 0.2)
+	var time_label := "Time: " + time_str
+	var tl_size := font.get_string_size(time_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+	draw_string(font, Vector2(780 - tl_size.x, 40), time_label,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 18, time_col)
+	var tbar_x: float = 780.0 - tl_size.x
+	var tbar_y: float = 47.0
+	var tbar_w: float = tl_size.x
+	var tbar_h: float = 6.0
+	draw_rect(Rect2(tbar_x, tbar_y, tbar_w, tbar_h), Color(0.12, 0.12, 0.15))
+	var tbar_fill: float = tbar_w * clampf(run_time_left / 600.0, 0.0, 1.0)
+	var tbar_col := Color(0.3, 0.8, 0.4) if run_time_left >= 60.0 else Color(0.9, 0.4, 0.1)
+	draw_rect(Rect2(tbar_x, tbar_y, tbar_fill, tbar_h), tbar_col)
 
 	# Draw edges
 	for row_idx in range(run_map.size() - 1):
@@ -565,7 +575,7 @@ func _draw_roguelike_map() -> void:
 		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
 		draw_string(font, Vector2(400 - msg_size.x / 2, 270), msg,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color(1.0, 0.3, 0.3))
-		var sub := "Reached Act %d  |  Click to return" % run_act
+		var sub := "Act %d  |  Click to return" % run_act
 		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
 		draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.7, 0.5, 0.5))
@@ -1023,6 +1033,8 @@ func _process(delta: float) -> void:
 		return
 
 	game_time += delta
+	if in_roguelike_run:
+		run_time_left = maxf(0.0, run_time_left - delta)
 	if game_won or game_lost:
 		queue_redraw()
 		return
@@ -1197,15 +1209,9 @@ func _resolve_arrival(unit_data: Dictionary) -> void:
 
 		if defender_remaining >= attacker_remaining:
 			# Defender holds
-			var prev_units: int = target["units"]
 			target["units"] = maxi(0, int(floor(defender_remaining)))
 			target["units_fractional"] = defender_remaining - float(target["units"])
 			target["fractional_timestamp"] = game_time
-			# Home base took damage — drain run HP proportionally
-			if in_roguelike_run and target["id"] == home_base_id and target["owner"] == "player":
-				var units_lost: int = prev_units - target["units"]
-				if units_lost > 0:
-					run_hp = maxi(0, run_hp - clampi(units_lost / 2, 1, 50))
 		else:
 			# Attacker captures
 			target["units"] = maxi(1, int(floor(attacker_remaining)))
@@ -1613,8 +1619,10 @@ func _check_win_condition() -> void:
 		if not has_opponent:
 			game_won = true
 		elif in_roguelike_run:
-			# In roguelike: lose only if home base is no longer player-owned
-			if home_base_id >= 0 and buildings[home_base_id]["owner"] != "player":
+			# In roguelike: lose if time expired or home base is captured
+			if run_time_left <= 0.0:
+				game_lost = true
+			elif home_base_id >= 0 and buildings[home_base_id]["owner"] != "player":
 				game_lost = true
 		elif not has_player:
 			game_lost = true
@@ -2230,21 +2238,26 @@ func _draw_hud() -> void:
 		draw_string(font, Vector2(10, 24), hud_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.9, 0.9, 0.9))
 
-	# Run HP bar during roguelike battles
+	# Run time bar during roguelike battles
 	if in_roguelike_run:
 		var rbar_x: float = 620.0
 		var rbar_y: float = 8.0
 		var rbar_w: float = 150.0
-		var rbar_h: float = 14.0
-		draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.2, 0.1, 0.1))
-		var rfill: float = rbar_w * float(run_hp) / float(run_max_hp)
-		draw_rect(Rect2(rbar_x, rbar_y, rfill, rbar_h), Color(0.8, 0.2, 0.2))
-		draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.5, 0.2, 0.2), false, 1.0)
-		var rhp_text := "Run HP: %d" % run_hp
-		draw_string(font, Vector2(rbar_x + 4, rbar_y + 11), rhp_text,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.8, 0.8))
+		var rbar_h: float = 10.0
+		var rt_col := Color(0.3, 0.8, 0.4) if run_time_left >= 60.0 else Color(0.9, 0.4, 0.1)
+		draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.1, 0.12, 0.1))
+		var rfill: float = rbar_w * clampf(run_time_left / 600.0, 0.0, 1.0)
+		draw_rect(Rect2(rbar_x, rbar_y, rfill, rbar_h), rt_col)
+		var time_str := _format_run_time()
+		var rtxt_col := Color(0.85, 1.0, 0.85)
+		if run_time_left < 30.0:
+			rtxt_col = Color(1.0, 0.3, 0.3) if int(game_time * 2.0) % 2 == 0 else Color(0.7, 0.1, 0.1)
+		elif run_time_left < 60.0:
+			rtxt_col = Color(1.0, 0.7, 0.3)
+		draw_string(font, Vector2(rbar_x + 4, rbar_y + 21), "Time: " + time_str,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, rtxt_col)
 		var rgold_text := "Gold: %d" % run_gold
-		draw_string(font, Vector2(rbar_x + 4, rbar_y + 24), rgold_text,
+		draw_string(font, Vector2(rbar_x + 4, rbar_y + 33), rgold_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.85, 0.2))
 
 	# Instructions
@@ -2260,7 +2273,12 @@ func _draw_hud() -> void:
 		_draw_end_overlay(win_text, Color(1, 1, 0.3))
 
 	if game_lost:
-		_draw_end_overlay("DEFEATED! All your buildings lost.", Color(1.0, 0.3, 0.3))
+		var lost_text: String
+		if in_roguelike_run and run_time_left <= 0.0:
+			lost_text = "TIME'S UP! Run time expired."
+		else:
+			lost_text = "DEFEATED! All your buildings lost."
+		_draw_end_overlay(lost_text, Color(1.0, 0.3, 0.3))
 
 func _draw_end_overlay(text: String, color: Color) -> void:
 	var font := ThemeDB.fallback_font
