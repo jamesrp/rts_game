@@ -1034,11 +1034,22 @@ func _update_dispatch_queues(delta: float) -> void:
 	var to_remove: Array = []
 	for i in range(dispatch_queues.size()):
 		var q: Dictionary = dispatch_queues[i]
+		var source: Dictionary = buildings[q["source_id"]]
+		# Cancel queue if building changed owner
+		if source["owner"] != q["owner"]:
+			to_remove.append(i)
+			continue
 		q["wave_timer"] += delta
 		var interval: float = 1.0 / ARMY_WAVES_PER_SECOND
 		while q["wave_timer"] >= interval and q["remaining"] > 0:
 			q["wave_timer"] -= interval
 			var wave_size: int = mini(MAX_ARMY_WIDTH, q["remaining"])
+			# Cap to available units in the building
+			wave_size = mini(wave_size, source["units"])
+			if wave_size <= 0:
+				q["remaining"] = 0
+				break
+			source["units"] -= wave_size
 			q["remaining"] -= wave_size
 			for _j in range(wave_size):
 				var lateral: float = (float(_j) - float(wave_size - 1) / 2.0) * UNIT_FORMATION_SPACING
@@ -1359,7 +1370,6 @@ func _ai_do_send(source: Dictionary, target: Dictionary) -> bool:
 	var send_count: int = int(source["units"] * _ai_get_send_ratio())
 	if send_count <= 2:
 		return false
-	source["units"] -= send_count
 	dispatch_queues.append({
 		"source_id": source["id"],
 		"target_id": target["id"],
@@ -1740,7 +1750,6 @@ func _send_units(source_id: int, target_id: int) -> void:
 	var send_count: int = int(source["units"] * send_ratio)
 	if send_count <= 0:
 		return
-	source["units"] -= send_count
 	sfx_whoosh.play()
 	dispatch_queues.append({
 		"source_id": source_id,
