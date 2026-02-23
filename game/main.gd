@@ -1033,7 +1033,7 @@ func _process(delta: float) -> void:
 		return
 
 	game_time += delta
-	if in_roguelike_run:
+	if in_roguelike_run and not game_won and not game_lost:
 		run_time_left = maxf(0.0, run_time_left - delta)
 	if game_won or game_lost:
 		queue_redraw()
