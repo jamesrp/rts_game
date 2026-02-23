@@ -61,10 +61,11 @@ var in_roguelike_run: bool = false
 var run_hp: int = 100
 var run_max_hp: int = 100
 var run_act: int = 1
+var run_gold: int = 0
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
-var run_overlay: String = ""  # "", "run_over", "run_won"
+var run_overlay: String = ""  # "", "run_over", "run_won", "merchant"
 var home_base_id: int = -1
 
 # === Level Select UI ===
@@ -189,6 +190,7 @@ func _start_roguelike_run() -> void:
 	run_hp = 100
 	run_max_hp = 100
 	run_act = 1
+	run_gold = 0
 	run_current_row = 0
 	run_last_node = -1
 	run_overlay = ""
@@ -230,6 +232,18 @@ func _generate_run_map(act: int) -> Array:
 	for i in range(mini(elite_count, elite_candidates.size())):
 		var rc: Array = elite_candidates[i]
 		map[rc[0]][rc[1]]["type"] = "elite"
+
+	# Assign 1 merchant node in a middle row (rows 1-3, not row 0 or boss row)
+	var merchant_candidates: Array = []
+	for row_idx in [1, 2, 3]:
+		if row_idx < map.size() - 1:  # not boss row
+			for col_idx in range(map[row_idx].size()):
+				if map[row_idx][col_idx]["type"] == "battle":
+					merchant_candidates.append([row_idx, col_idx])
+	merchant_candidates.shuffle()
+	if merchant_candidates.size() > 0:
+		var mc: Array = merchant_candidates[0]
+		map[mc[0]][mc[1]]["type"] = "merchant"
 
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
@@ -319,7 +333,13 @@ func _return_from_roguelike_battle() -> void:
 
 	if won:
 		run_map[run_current_row][run_last_node]["completed"] = true
-		var is_boss: bool = run_map[run_current_row][run_last_node]["type"] == "boss"
+		var node_type_r: String = run_map[run_current_row][run_last_node]["type"]
+		# Award gold based on node type
+		match node_type_r:
+			"boss": run_gold += randi_range(40, 60)
+			"elite": run_gold += randi_range(25, 35)
+			_: run_gold += randi_range(10, 20)
+		var is_boss: bool = node_type_r == "boss"
 		if is_boss:
 			if run_act >= 3:
 				run_overlay = "run_won"
@@ -350,6 +370,20 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				_abandon_roguelike_run()
 		return
 
+	# Merchant overlay: handle shop button clicks
+	if run_overlay == "merchant":
+		var spend_rect := Rect2(280, 255, 240, 44)
+		var leave_rect := Rect2(310, 315, 180, 40)
+		if spend_rect.has_point(event.position) and run_gold >= 50:
+			run_gold -= 50
+			sfx_click.play()
+		elif leave_rect.has_point(event.position):
+			run_map[run_current_row][run_last_node]["completed"] = true
+			run_current_row += 1
+			run_overlay = ""
+			sfx_click.play()
+		return
+
 	# If overlay is showing, click dismisses it
 	if run_overlay == "run_over" or run_overlay == "run_won":
 		game_state = "level_select"
@@ -364,7 +398,11 @@ func _input_roguelike_map(event: InputEvent) -> void:
 		var node: Dictionary = run_map[run_current_row][col_idx]
 		if node["position"].distance_to(event.position) <= 22.0 and _is_node_available(run_current_row, col_idx):
 			sfx_click.play()
-			_start_roguelike_battle(col_idx)
+			if node["type"] == "merchant":
+				run_last_node = col_idx
+				run_overlay = "merchant"
+			else:
+				_start_roguelike_battle(col_idx)
 			return
 
 func _draw_roguelike_map() -> void:
@@ -376,6 +414,11 @@ func _draw_roguelike_map() -> void:
 	var title_size := font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
 	draw_string(font, Vector2(400 - title_size.x / 2, 40), title,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.9, 0.85, 0.6))
+
+	# Gold counter
+	var gold_text := "Gold: %d" % run_gold
+	draw_string(font, Vector2(30, 40), gold_text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
 
 	# HP bar
 	var hp_text := "HP: %d / %d" % [run_hp, run_max_hp]
@@ -444,6 +487,17 @@ func _draw_roguelike_map() -> void:
 				if available:
 					var pulse: float = 0.4 + 0.4 * sin(game_time * 3.0)
 					draw_arc(pos, 20.0, 0, TAU, 32, Color(1.0, 0.85, 0.2, pulse), 2.0)
+			elif node["type"] == "merchant":
+				var m_col := Color(0.9, 0.75, 0.15) if available else Color(0.45, 0.38, 0.08)
+				draw_circle(pos, 15.0, Color(0.12, 0.1, 0.02))
+				draw_arc(pos, 15.0, 0, TAU, 32, m_col, 2.5)
+				# Coin icon: filled circle with inner ring
+				draw_circle(pos, 7.0, m_col)
+				draw_circle(pos, 4.5, Color(0.12, 0.1, 0.02))
+				draw_arc(pos, 4.5, 0, TAU, 24, m_col, 1.0)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(game_time * 3.0)
+					draw_arc(pos, 19.0, 0, TAU, 32, Color(1.0, 0.85, 0.2, pulse), 2.0)
 			elif available:
 				var pulse: float = 0.6 + 0.3 * sin(game_time * 3.0)
 				draw_circle(pos, 14.0, Color(0.15, 0.2, 0.35))
@@ -469,7 +523,43 @@ func _draw_roguelike_map() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.5, 0.5, 0.55))
 
 	# Overlays
-	if run_overlay == "run_over":
+	if run_overlay == "merchant":
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.7))
+		var panel := Rect2(200, 160, 400, 210)
+		draw_rect(panel, Color(0.1, 0.09, 0.02))
+		draw_rect(panel, Color(0.7, 0.6, 0.15), false, 2.0)
+		var m_title := "MERCHANT"
+		var mt_size := font.get_string_size(m_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
+		draw_string(font, Vector2(400 - mt_size.x / 2, 198), m_title,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.85, 0.2))
+		var gold_disp := "Your gold: %d" % run_gold
+		var gd_size := font.get_string_size(gold_disp, HORIZONTAL_ALIGNMENT_CENTER, -1, 17)
+		draw_string(font, Vector2(400 - gd_size.x / 2, 228), gold_disp,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.9, 0.9))
+		# Spend button
+		var spend_rect := Rect2(280, 255, 240, 44)
+		var can_spend := run_gold >= 50
+		draw_rect(spend_rect, Color(0.16, 0.13, 0.04) if can_spend else Color(0.12, 0.12, 0.12))
+		draw_rect(spend_rect, Color(0.7, 0.6, 0.15) if can_spend else Color(0.3, 0.3, 0.3), false, 1.5)
+		var spend_label := "Spend 50g  [placeholder]"
+		var sl_size := font.get_string_size(spend_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 15)
+		var sl_col := Color(0.95, 0.85, 0.3) if can_spend else Color(0.4, 0.4, 0.4)
+		draw_string(font, Vector2(spend_rect.position.x + (spend_rect.size.x - sl_size.x) / 2, spend_rect.position.y + 28),
+			spend_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, sl_col)
+		if not can_spend:
+			var no_gold := "(not enough gold)"
+			var ng_size := font.get_string_size(no_gold, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			draw_string(font, Vector2(400 - ng_size.x / 2, 308), no_gold,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.55, 0.4, 0.4))
+		# Leave button
+		var leave_rect := Rect2(310, 315, 180, 40)
+		draw_rect(leave_rect, Color(0.12, 0.12, 0.18))
+		draw_rect(leave_rect, Color(0.35, 0.35, 0.5), false, 1.5)
+		var leave_label := "Leave Shop"
+		var ll_size := font.get_string_size(leave_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+		draw_string(font, Vector2(leave_rect.position.x + (leave_rect.size.x - ll_size.x) / 2, leave_rect.position.y + 26),
+			leave_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.8, 0.85))
+	elif run_overlay == "run_over":
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.6))
 		var msg := "RUN OVER"
 		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
@@ -2153,6 +2243,9 @@ func _draw_hud() -> void:
 		var rhp_text := "Run HP: %d" % run_hp
 		draw_string(font, Vector2(rbar_x + 4, rbar_y + 11), rhp_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.8, 0.8))
+		var rgold_text := "Gold: %d" % run_gold
+		draw_string(font, Vector2(rbar_x + 4, rbar_y + 24), rgold_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.85, 0.2))
 
 	# Instructions
 	var help_text: String = "Click: menu  |  Right-click: quick upgrade  |  Drag: send  |  Forges: +10% str  |  Towers: shoot enemies"
