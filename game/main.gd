@@ -79,6 +79,7 @@ var sfx_click: AudioStreamPlayer
 var sfx_whoosh: AudioStreamPlayer
 var sfx_capture: AudioStreamPlayer
 var sfx_upgrade: AudioStreamPlayer
+var sfx_merchant: Array[AudioStreamPlayer] = []
 
 func _ready() -> void:
 	_build_level_select_buttons()
@@ -121,70 +122,21 @@ func _build_level_select_buttons() -> void:
 		"label": "Start Run",
 	})
 
-func _create_sfx(duration_sec: float, generator: Callable) -> AudioStreamPlayer:
-	var sample_rate := 22050
+func _load_sfx(path: String) -> AudioStreamPlayer:
 	var player := AudioStreamPlayer.new()
 	player.bus = "Master"
+	player.stream = load(path)
 	add_child(player)
-	var num_samples := int(sample_rate * duration_sec)
-	var wav := AudioStreamWAV.new()
-	wav.format = AudioStreamWAV.FORMAT_8_BITS
-	wav.mix_rate = sample_rate
-	wav.stereo = false
-	var data := PackedByteArray()
-	data.resize(num_samples)
-	generator.call(data, num_samples, sample_rate)
-	wav.data = data
-	player.stream = wav
 	return player
 
 func _init_sounds() -> void:
-	# Click: soft sine pop 440Hz, ~100ms
-	sfx_click = _create_sfx(0.10, func(data: PackedByteArray, num_samples: int, sample_rate: int) -> void:
-		for i in range(num_samples):
-			var t := float(i) / sample_rate
-			var p := float(i) / num_samples
-			var attack := minf(p / 0.05, 1.0)
-			var env := attack * exp(-6.0 * p)
-			var val := sin(TAU * 440.0 * t) * env * 0.7
-			data[i] = int((val * 0.5 + 0.5) * 255.0)
-	)
-
-	# Whoosh: filtered noise, ~250ms
-	sfx_whoosh = _create_sfx(0.25, func(data: PackedByteArray, num_samples: int, sample_rate: int) -> void:
-		var prev_noise := 0.0
-		for i in range(num_samples):
-			var p := float(i) / num_samples
-			var attack := minf(p / 0.1, 1.0)
-			var env := attack * exp(-4.0 * p)
-			var raw := randf_range(-1.0, 1.0)
-			prev_noise = prev_noise * 0.7 + raw * 0.3
-			data[i] = int((prev_noise * env * 0.5 * 0.5 + 0.5) * 255.0)
-	)
-
-	# Capture chime: two-tone C4->E4, ~350ms
-	sfx_capture = _create_sfx(0.35, func(data: PackedByteArray, num_samples: int, sample_rate: int) -> void:
-		for i in range(num_samples):
-			var t := float(i) / sample_rate
-			var p := float(i) / num_samples
-			var attack := minf(p / 0.05, 1.0)
-			var env := attack * exp(-3.0 * p)
-			var blend := clampf((p - 0.4) / 0.2, 0.0, 1.0)
-			var freq := lerpf(261.63, 329.63, blend)
-			var val := sin(TAU * freq * t) * env * 0.7
-			data[i] = int((val * 0.5 + 0.5) * 255.0)
-	)
-
-	# Upgrade ding: warm sine 600Hz, ~300ms
-	sfx_upgrade = _create_sfx(0.3, func(data: PackedByteArray, num_samples: int, sample_rate: int) -> void:
-		for i in range(num_samples):
-			var t := float(i) / sample_rate
-			var p := float(i) / num_samples
-			var attack := minf(p / 0.05, 1.0)
-			var env := attack * exp(-4.0 * p)
-			var val := (sin(TAU * 600.0 * t) + 0.2 * sin(TAU * 1200.0 * t)) * env * 0.6
-			data[i] = int((val * 0.5 + 0.5) * 255.0)
-	)
+	sfx_click   = _load_sfx("res://sounds/788611__el_boss__ui-button-press.wav")
+	sfx_whoosh  = _load_sfx("res://sounds/840717__nomagician__sword-swing-3.mp3")
+	sfx_capture = _load_sfx("res://sounds/843251__qubodup__explosion-5-burning-car-rec-by-nado.wav")
+	sfx_upgrade = _load_sfx("res://sounds/732254__waveadventurer__positive-warbly-ascending-thingy.wav")
+	sfx_merchant.append(_load_sfx("res://sounds/665183__el_boss__item-or-material-pickup-pop-1-of-3.wav"))
+	sfx_merchant.append(_load_sfx("res://sounds/665182__el_boss__item-or-material-pickup-pop-2-of-3.wav"))
+	sfx_merchant.append(_load_sfx("res://sounds/665181__el_boss__item-or-material-pickup-pop-3-of-3.wav"))
 
 # === Roguelike Run ===
 
@@ -353,6 +305,7 @@ func _return_from_roguelike_battle() -> void:
 				game_state = "roguelike_map"
 			else:
 				run_act += 1
+				run_time_left = 600.0
 				run_map = _generate_run_map(run_act)
 				run_current_row = 0
 				run_last_node = -1
@@ -384,7 +337,7 @@ func _input_roguelike_map(event: InputEvent) -> void:
 			if buy_rects[i].has_point(event.position) and run_gold >= 80:
 				run_gold -= 80
 				run_upgrades[item_keys[i]] += 1
-				sfx_click.play()
+				sfx_merchant[randi() % sfx_merchant.size()].play()
 				return
 		var leave_rect := Rect2(305, 376, 190, 34)
 		if leave_rect.has_point(event.position):
@@ -1644,8 +1597,8 @@ func _check_win_condition() -> void:
 		if not has_opponent:
 			game_won = true
 		elif in_roguelike_run:
-			# In roguelike: lose if time expired
-			if run_time_left <= 0.0:
+			# In roguelike: lose if time expired OR player has no buildings/units
+			if run_time_left <= 0.0 or not has_player:
 				game_lost = true
 		elif not has_player:
 			game_lost = true
