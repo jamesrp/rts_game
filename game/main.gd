@@ -66,7 +66,6 @@ var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
 var run_overlay: String = ""  # "", "run_over", "run_won", "merchant"
-var home_base_id: int = -1
 
 # === Mouse State ===
 var mouse_pos: Vector2 = Vector2.ZERO
@@ -338,7 +337,6 @@ func _return_from_roguelike_battle() -> void:
 	context_menu_building_id = -1
 	context_menu_options.clear()
 	in_roguelike_run = false
-	home_base_id = -1
 
 	if won:
 		run_map[run_current_row][run_last_node]["completed"] = true
@@ -1033,15 +1031,6 @@ func _start_level(mode: String, level: int, config_override: Dictionary = {}) ->
 			"fractional_timestamp": 0.0,
 		})
 
-	# Set home base to rearmost player building in roguelike runs
-	if in_roguelike_run:
-		var best_y: float = -1.0
-		home_base_id = -1
-		for b in buildings:
-			if b["owner"] == "player" and b["position"].y > best_y:
-				best_y = b["position"].y
-				home_base_id = b["id"]
-
 func _return_to_menu() -> void:
 	game_state = "level_select"
 	buildings.clear()
@@ -1050,7 +1039,6 @@ func _return_to_menu() -> void:
 	visual_effects.clear()
 	context_menu_building_id = -1
 	context_menu_options.clear()
-	home_base_id = -1
 
 # === Main Loop ===
 
@@ -1266,9 +1254,6 @@ func _resolve_arrival(unit_data: Dictionary) -> void:
 				"duration": 0.4,
 				"color": _get_owner_color(unit_data["owner"]),
 			})
-			# Home base captured — immediate battle loss
-			if in_roguelike_run and target["id"] == home_base_id:
-				game_lost = true
 
 func _get_owner_color(owner: String) -> Color:
 	if owner == "player":
@@ -1659,10 +1644,8 @@ func _check_win_condition() -> void:
 		if not has_opponent:
 			game_won = true
 		elif in_roguelike_run:
-			# In roguelike: lose if time expired or home base is captured
+			# In roguelike: lose if time expired
 			if run_time_left <= 0.0:
-				game_lost = true
-			elif home_base_id >= 0 and buildings[home_base_id]["owner"] != "player":
 				game_lost = true
 		elif not has_player:
 			game_lost = true
@@ -2035,13 +2018,6 @@ func _draw_buildings() -> void:
 
 		var is_forge: bool = b["type"] == "forge"
 		var is_tower: bool = b["type"] == "tower"
-
-		# Home base visual distinction: pulsing gold/white shield ring
-		if in_roguelike_run and b["id"] == home_base_id and b["owner"] == "player":
-			radius += 4.0
-			var shield_alpha: float = 0.5 + 0.3 * sin(game_time * 3.0)
-			draw_arc(pos, radius + 6, 0, TAU, 48, Color(1.0, 0.9, 0.4, shield_alpha), 3.0)
-			draw_arc(pos, radius + 9, 0, TAU, 48, Color(1.0, 1.0, 1.0, shield_alpha * 0.4), 1.5)
 
 		_draw_building_shape(b, pos, radius, fill_color, outline_color)
 
