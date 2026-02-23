@@ -13,14 +13,20 @@ const BASE_CAPACITY := 20
 const FORGE_COST := 30
 const BASE_BUILDING_RADIUS := 20.0
 const BUILDING_RADIUS_PER_LEVEL := 5.0
+const MAX_ARMY_WIDTH: int = 5
+const ARMY_WAVES_PER_SECOND: float = 3.0
+const UNIT_TRIANGLE_SIZE: float = 3.0
+const UNIT_FORMATION_SPACING: float = 7.0
 
 # === Building Data ===
 var buildings: Array = []
-# Each building: {id, position, owner, units, level, max_capacity, gen_timer, upgrading, upgrade_progress, upgrade_duration}
+# Each building: {id, position, owner, units, level, max_capacity, gen_timer, upgrading, upgrade_progress, upgrade_duration, units_fractional, fractional_timestamp}
 
-# === Unit Groups ===
-var unit_groups: Array = []
-# Each group: {count, source_id, target_id, owner, progress, speed, start_pos, end_pos}
+# === Dispatch Queues & Moving Units ===
+var dispatch_queues: Array = []
+# Each queue: {source_id, target_id, owner, remaining, wave_timer, start_pos, end_pos}
+var moving_units: Array = []
+# Each unit: {source_id, target_id, owner, progress, start_pos, end_pos}
 
 # === Selection State ===
 var selected_building_id: int = -1
@@ -303,7 +309,8 @@ func _return_from_roguelike_battle() -> void:
 	var won: bool = game_won
 	# Clean up battle state
 	buildings.clear()
-	unit_groups.clear()
+	dispatch_queues.clear()
+	moving_units.clear()
 	visual_effects.clear()
 	context_menu_building_id = -1
 	context_menu_options.clear()
@@ -840,7 +847,8 @@ func _start_level(mode: String, level: int, config_override: Dictionary = {}) ->
 	game_time = 0.0
 	ai_timer = 0.0
 	buildings.clear()
-	unit_groups.clear()
+	dispatch_queues.clear()
+	moving_units.clear()
 	visual_effects.clear()
 	selected_building_id = -1
 	is_dragging = false
@@ -890,6 +898,8 @@ func _start_level(mode: String, level: int, config_override: Dictionary = {}) ->
 			"upgrade_progress": 0.0,
 			"upgrade_duration": 0.0,
 			"shoot_timer": 0.0,
+			"units_fractional": 0.0,
+			"fractional_timestamp": 0.0,
 		})
 
 	# Set home base to rearmost player building in roguelike runs
@@ -904,7 +914,8 @@ func _start_level(mode: String, level: int, config_override: Dictionary = {}) ->
 func _return_to_menu() -> void:
 	game_state = "level_select"
 	buildings.clear()
-	unit_groups.clear()
+	dispatch_queues.clear()
+	moving_units.clear()
 	visual_effects.clear()
 	context_menu_building_id = -1
 	context_menu_options.clear()
@@ -929,7 +940,8 @@ func _process(delta: float) -> void:
 	_update_unit_generation(delta)
 	_update_upgrades(delta)
 	_update_towers(delta)
-	_update_unit_groups(delta)
+	_update_dispatch_queues(delta)
+	_update_moving_units(delta)
 	_update_visual_effects(delta)
 	if current_mode == "ai":
 		_update_ai(delta)
@@ -975,7 +987,7 @@ func _update_upgrades(delta: float) -> void:
 			sfx_upgrade.play()
 
 func _update_towers(delta: float) -> void:
-	var groups_to_remove: Array = []
+	var units_to_remove: Array = []
 	for b in buildings:
 		if b["type"] != "tower":
 			continue
@@ -984,30 +996,25 @@ func _update_towers(delta: float) -> void:
 		if b["shoot_timer"] < interval:
 			continue
 		b["shoot_timer"] -= interval
-		# Find closest enemy unit group within range
+		# Find closest enemy moving unit within range
 		var shoot_radius: float = _get_tower_shoot_radius(b["level"])
 		var best_idx: int = -1
 		var best_dist: float = 99999.0
-		for i in range(unit_groups.size()):
-			var g: Dictionary = unit_groups[i]
-			if g["owner"] == b["owner"]:
+		for i in range(moving_units.size()):
+			var u: Dictionary = moving_units[i]
+			if u["owner"] == b["owner"]:
 				continue
-			if i in groups_to_remove:
+			if i in units_to_remove:
 				continue
-			var t: float = g["progress"]
-			var eased_t: float = _ease_out_cubic(t)
-			var group_pos: Vector2 = g["start_pos"].lerp(g["end_pos"], eased_t)
-			var dist: float = b["position"].distance_to(group_pos)
+			var unit_pos: Vector2 = _get_unit_position(u)
+			var dist: float = b["position"].distance_to(unit_pos)
 			if dist <= shoot_radius and dist < best_dist:
 				best_dist = dist
 				best_idx = i
 		if best_idx != -1:
-			var g: Dictionary = unit_groups[best_idx]
-			g["count"] -= 1
+			var u: Dictionary = moving_units[best_idx]
 			# Visual effect: shot line
-			var t: float = g["progress"]
-			var eased_t: float = _ease_out_cubic(t)
-			var target_pos: Vector2 = g["start_pos"].lerp(g["end_pos"], eased_t)
+			var target_pos: Vector2 = _get_unit_position(u)
 			visual_effects.append({
 				"type": "tower_shot",
 				"start": b["position"],
@@ -1016,39 +1023,71 @@ func _update_towers(delta: float) -> void:
 				"duration": 0.2,
 				"color": _get_owner_color(b["owner"]),
 			})
-			if g["count"] <= 0:
-				groups_to_remove.append(best_idx)
-	# Remove destroyed groups (reverse order)
-	groups_to_remove.sort()
-	groups_to_remove.reverse()
-	for idx in groups_to_remove:
-		unit_groups.remove_at(idx)
+			units_to_remove.append(best_idx)
+	# Remove destroyed units (reverse order)
+	units_to_remove.sort()
+	units_to_remove.reverse()
+	for idx in units_to_remove:
+		moving_units.remove_at(idx)
 
-func _update_unit_groups(delta: float) -> void:
+func _update_dispatch_queues(delta: float) -> void:
+	var to_remove: Array = []
+	for i in range(dispatch_queues.size()):
+		var q: Dictionary = dispatch_queues[i]
+		q["wave_timer"] += delta
+		var interval: float = 1.0 / ARMY_WAVES_PER_SECOND
+		while q["wave_timer"] >= interval and q["remaining"] > 0:
+			q["wave_timer"] -= interval
+			var wave_size: int = mini(MAX_ARMY_WIDTH, q["remaining"])
+			q["remaining"] -= wave_size
+			for _j in range(wave_size):
+				var lateral: float = (float(_j) - float(wave_size - 1) / 2.0) * UNIT_FORMATION_SPACING
+				moving_units.append({
+					"source_id": q["source_id"],
+					"target_id": q["target_id"],
+					"owner": q["owner"],
+					"progress": 0.0,
+					"start_pos": q["start_pos"],
+					"end_pos": q["end_pos"],
+					"lateral_offset": lateral,
+				})
+		if q["remaining"] <= 0:
+			to_remove.append(i)
+	to_remove.reverse()
+	for idx in to_remove:
+		dispatch_queues.remove_at(idx)
+
+func _update_moving_units(delta: float) -> void:
 	var resolved: Array = []
-	for i in range(unit_groups.size()):
-		var g: Dictionary = unit_groups[i]
-		var dist: float = g["start_pos"].distance_to(g["end_pos"])
+	for i in range(moving_units.size()):
+		var u: Dictionary = moving_units[i]
+		var dist: float = u["start_pos"].distance_to(u["end_pos"])
 		if dist < 1.0:
 			dist = 1.0
-		g["progress"] += (UNIT_SPEED / dist) * delta
-		if g["progress"] >= 1.0:
-			_resolve_arrival(g)
+		u["progress"] += (UNIT_SPEED / dist) * delta
+		if u["progress"] >= 1.0:
+			_resolve_arrival(u)
 			resolved.append(i)
 	resolved.reverse()
 	for idx in resolved:
-		unit_groups.remove_at(idx)
+		moving_units.remove_at(idx)
 
-func _resolve_arrival(group: Dictionary) -> void:
-	var target: Dictionary = buildings[group["target_id"]]
-	if target["owner"] == group["owner"]:
+func _get_fractional(building: Dictionary) -> float:
+	if game_time - building["fractional_timestamp"] >= 10.0:
+		building["units_fractional"] = 0.0
+		return 0.0
+	return building["units_fractional"]
+
+func _resolve_arrival(unit_data: Dictionary) -> void:
+	var target: Dictionary = buildings[unit_data["target_id"]]
+	if target["owner"] == unit_data["owner"]:
 		# Reinforce
-		target["units"] += group["count"]
+		target["units"] += 1
 	else:
-		# Combat with multipliers
-		var A: float = float(group["count"])
-		var D: float = float(target["units"])
-		var att_mult: float = _get_attacker_multiplier(group["owner"])
+		# Combat with multipliers — single unit arriving
+		var A: float = 1.0
+		var D: float = float(target["units"]) + _get_fractional(target)
+		var att_mult: float = _get_attacker_multiplier(unit_data["owner"])
 		var def_mult: float = _get_defender_multiplier(target)
 		var attacker_losses: float = D * def_mult / att_mult
 		var defender_losses: float = A * att_mult / def_mult
@@ -1057,16 +1096,21 @@ func _resolve_arrival(group: Dictionary) -> void:
 
 		if defender_remaining >= attacker_remaining:
 			# Defender holds
-			target["units"] = maxi(0, int(round(defender_remaining)))
+			var prev_units: int = target["units"]
+			target["units"] = maxi(0, int(floor(defender_remaining)))
+			target["units_fractional"] = defender_remaining - float(target["units"])
+			target["fractional_timestamp"] = game_time
 			# Home base took damage — drain run HP proportionally
 			if in_roguelike_run and target["id"] == home_base_id and target["owner"] == "player":
-				var units_lost: int = int(D) - target["units"]
+				var units_lost: int = prev_units - target["units"]
 				if units_lost > 0:
 					run_hp = maxi(0, run_hp - clampi(units_lost / 2, 1, 50))
 		else:
 			# Attacker captures
-			target["units"] = maxi(1, int(round(attacker_remaining)))
-			target["owner"] = group["owner"]
+			target["units"] = maxi(1, int(floor(attacker_remaining)))
+			target["units_fractional"] = attacker_remaining - float(target["units"])
+			target["fractional_timestamp"] = game_time
+			target["owner"] = unit_data["owner"]
 			if target["type"] != "forge" and target["type"] != "tower":
 				target["level"] = 1
 			target["gen_timer"] = 0.0
@@ -1079,7 +1123,7 @@ func _resolve_arrival(group: Dictionary) -> void:
 				"position": target["position"],
 				"timer": 0.0,
 				"duration": 0.4,
-				"color": _get_owner_color(group["owner"]),
+				"color": _get_owner_color(unit_data["owner"]),
 			})
 			# Home base captured — immediate battle loss
 			if in_roguelike_run and target["id"] == home_base_id:
@@ -1240,6 +1284,13 @@ func _ai_general(ai_buildings: Array) -> void:
 func _ease_out_cubic(t: float) -> float:
 	return 1.0 - pow(1.0 - t, 3.0)
 
+func _get_unit_position(u: Dictionary) -> Vector2:
+	var eased_t: float = _ease_out_cubic(u["progress"])
+	var center: Vector2 = u["start_pos"].lerp(u["end_pos"], eased_t)
+	var dir: Vector2 = (u["end_pos"] - u["start_pos"]).normalized()
+	var perp: Vector2 = Vector2(-dir.y, dir.x)
+	return center + perp * u.get("lateral_offset", 0.0)
+
 # === Upgrade Helpers ===
 
 func _get_upgrade_cost(level: int) -> int:
@@ -1309,13 +1360,12 @@ func _ai_do_send(source: Dictionary, target: Dictionary) -> bool:
 	if send_count <= 2:
 		return false
 	source["units"] -= send_count
-	unit_groups.append({
-		"count": send_count,
+	dispatch_queues.append({
 		"source_id": source["id"],
 		"target_id": target["id"],
 		"owner": "opponent",
-		"progress": 0.0,
-		"speed": UNIT_SPEED,
+		"remaining": send_count,
+		"wave_timer": 0.0,
 		"start_pos": source["position"],
 		"end_pos": target["position"],
 	})
@@ -1449,11 +1499,16 @@ func _check_win_condition() -> void:
 				has_player = true
 			elif b["owner"] == "opponent":
 				has_opponent = true
-		# Also check in-flight groups
-		for g in unit_groups:
-			if g["owner"] == "player":
+		# Also check in-flight units and dispatch queues
+		for u in moving_units:
+			if u["owner"] == "player":
 				has_player = true
-			elif g["owner"] == "opponent":
+			elif u["owner"] == "opponent":
+				has_opponent = true
+		for q in dispatch_queues:
+			if q["owner"] == "player":
+				has_player = true
+			elif q["owner"] == "opponent":
 				has_opponent = true
 		if not has_opponent:
 			game_won = true
@@ -1687,13 +1742,12 @@ func _send_units(source_id: int, target_id: int) -> void:
 		return
 	source["units"] -= send_count
 	sfx_whoosh.play()
-	unit_groups.append({
-		"count": send_count,
+	dispatch_queues.append({
 		"source_id": source_id,
 		"target_id": target_id,
 		"owner": "player",
-		"progress": 0.0,
-		"speed": UNIT_SPEED,
+		"remaining": send_count,
+		"wave_timer": 0.0,
 		"start_pos": source["position"],
 		"end_pos": buildings[target_id]["position"],
 	})
@@ -1708,10 +1762,10 @@ func _draw() -> void:
 		_draw_roguelike_map()
 		return
 	_draw_background()
-	_draw_unit_group_lines()
+	_draw_dispatch_queue_lines()
 	_draw_drag_line()
 	_draw_buildings()
-	_draw_unit_groups()
+	_draw_moving_units()
 	_draw_visual_effects()
 	_draw_context_menu()
 	_draw_hud()
@@ -1997,37 +2051,33 @@ func _draw_drag_line() -> void:
 		line_color = Color(0.5, 0.9, 0.5, 0.7)
 	draw_line(start, end, line_color, 2.0)
 
-func _draw_unit_group_lines() -> void:
-	for g in unit_groups:
-		var start: Vector2 = g["start_pos"]
-		var end_p: Vector2 = g["end_pos"]
+func _draw_dispatch_queue_lines() -> void:
+	for q in dispatch_queues:
+		var start: Vector2 = q["start_pos"]
+		var end_p: Vector2 = q["end_pos"]
 		var line_color: Color
-		if g["owner"] == "player":
-			line_color = Color(0.3, 0.5, 1.0, 0.15)
+		if q["owner"] == "player":
+			line_color = Color(0.3, 0.5, 1.0, 0.1)
 		else:
-			line_color = Color(1.0, 0.5, 0.2, 0.15)
+			line_color = Color(1.0, 0.5, 0.2, 0.1)
 		draw_line(start, end_p, line_color, 1.0)
 
-func _draw_unit_groups() -> void:
-	for g in unit_groups:
-		var start: Vector2 = g["start_pos"]
-		var end_p: Vector2 = g["end_pos"]
-		var t: float = g["progress"]
-		var eased_t: float = _ease_out_cubic(t)
-		var current: Vector2 = start.lerp(end_p, eased_t)
-		var dot_color: Color
-		var text_color: Color
-		if g["owner"] == "player":
-			dot_color = Color(0.3, 0.5, 1.0, 0.9)
-			text_color = Color(0.8, 0.9, 1.0)
+func _draw_moving_units() -> void:
+	for u in moving_units:
+		var center: Vector2 = _get_unit_position(u)
+		var dir: Vector2 = (u["end_pos"] - u["start_pos"]).normalized()
+		var perp: Vector2 = Vector2(-dir.y, dir.x)
+		var tri_color: Color
+		if u["owner"] == "player":
+			tri_color = Color(0.3, 0.5, 1.0, 0.9)
 		else:
-			dot_color = Color(1.0, 0.55, 0.15, 0.9)
-			text_color = Color(1.0, 0.8, 0.6)
-		draw_circle(current, 6.0, dot_color)
-		var font := ThemeDB.fallback_font
-		var text: String = str(g["count"])
-		draw_string(font, current + Vector2(8, -4),
-			text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, text_color)
+			tri_color = Color(1.0, 0.55, 0.15, 0.9)
+		var sz: float = UNIT_TRIANGLE_SIZE
+		var tip: Vector2 = center + dir * sz * 1.5
+		var left: Vector2 = center - dir * sz * 0.5 + perp * sz * 0.6
+		var right: Vector2 = center - dir * sz * 0.5 - perp * sz * 0.6
+		var pts: PackedVector2Array = PackedVector2Array([tip, left, right])
+		draw_colored_polygon(pts, tri_color)
 
 func _draw_context_menu() -> void:
 	if context_menu_building_id == -1 or context_menu_options.is_empty():
