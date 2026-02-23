@@ -61,11 +61,15 @@ var in_roguelike_run: bool = false
 var run_time_left: float = 600.0  # seconds; 10:00 starting total
 var run_act: int = 1
 var run_gold: int = 0
+var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
 var run_overlay: String = ""  # "", "run_over", "run_won", "merchant"
 var home_base_id: int = -1
+
+# === Mouse State ===
+var mouse_pos: Vector2 = Vector2.ZERO
 
 # === Level Select UI ===
 var level_buttons: Array = []
@@ -194,7 +198,8 @@ func _format_run_time() -> String:
 func _start_roguelike_run() -> void:
 	run_time_left = 600.0
 	run_act = 1
-	run_gold = 0
+	run_gold = 90
+	run_upgrades = {"speed": 0, "attack": 0, "defense": 0}
 	run_current_row = 0
 	run_last_node = -1
 	run_overlay = ""
@@ -375,12 +380,16 @@ func _input_roguelike_map(event: InputEvent) -> void:
 
 	# Merchant overlay: handle shop button clicks
 	if run_overlay == "merchant":
-		var spend_rect := Rect2(280, 255, 240, 44)
-		var leave_rect := Rect2(310, 315, 180, 40)
-		if spend_rect.has_point(event.position) and run_gold >= 50:
-			run_gold -= 50
-			sfx_click.play()
-		elif leave_rect.has_point(event.position):
+		var item_keys := ["speed", "attack", "defense"]
+		var buy_rects := [Rect2(370, 214, 160, 32), Rect2(370, 269, 160, 32), Rect2(370, 324, 160, 32)]
+		for i in range(3):
+			if buy_rects[i].has_point(event.position) and run_gold >= 80:
+				run_gold -= 80
+				run_upgrades[item_keys[i]] += 1
+				sfx_click.play()
+				return
+		var leave_rect := Rect2(305, 376, 190, 34)
+		if leave_rect.has_point(event.position):
 			run_map[run_current_row][run_last_node]["completed"] = true
 			run_current_row += 1
 			run_overlay = ""
@@ -418,10 +427,11 @@ func _draw_roguelike_map() -> void:
 	draw_string(font, Vector2(400 - title_size.x / 2, 40), title,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.9, 0.85, 0.6))
 
-	# Gold counter
+	# Gold counter + upgrade icons
 	var gold_text := "Gold: %d" % run_gold
 	draw_string(font, Vector2(30, 40), gold_text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
+	_draw_run_upgrade_icons(Vector2(30, 48), 14.0)
 
 	# Run time display (top-right)
 	var time_str := _format_run_time()
@@ -534,41 +544,62 @@ func _draw_roguelike_map() -> void:
 
 	# Overlays
 	if run_overlay == "merchant":
-		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.7))
-		var panel := Rect2(200, 160, 400, 210)
-		draw_rect(panel, Color(0.1, 0.09, 0.02))
+		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.72))
+		var panel := Rect2(155, 128, 490, 295)
+		draw_rect(panel, Color(0.09, 0.08, 0.02))
 		draw_rect(panel, Color(0.7, 0.6, 0.15), false, 2.0)
+		# Title
 		var m_title := "MERCHANT"
-		var mt_size := font.get_string_size(m_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
-		draw_string(font, Vector2(400 - mt_size.x / 2, 198), m_title,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.85, 0.2))
-		var gold_disp := "Your gold: %d" % run_gold
-		var gd_size := font.get_string_size(gold_disp, HORIZONTAL_ALIGNMENT_CENTER, -1, 17)
-		draw_string(font, Vector2(400 - gd_size.x / 2, 228), gold_disp,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.9, 0.9))
-		# Spend button
-		var spend_rect := Rect2(280, 255, 240, 44)
-		var can_spend := run_gold >= 50
-		draw_rect(spend_rect, Color(0.16, 0.13, 0.04) if can_spend else Color(0.12, 0.12, 0.12))
-		draw_rect(spend_rect, Color(0.7, 0.6, 0.15) if can_spend else Color(0.3, 0.3, 0.3), false, 1.5)
-		var spend_label := "Spend 50g  [placeholder]"
-		var sl_size := font.get_string_size(spend_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 15)
-		var sl_col := Color(0.95, 0.85, 0.3) if can_spend else Color(0.4, 0.4, 0.4)
-		draw_string(font, Vector2(spend_rect.position.x + (spend_rect.size.x - sl_size.x) / 2, spend_rect.position.y + 28),
-			spend_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, sl_col)
-		if not can_spend:
-			var no_gold := "(not enough gold)"
-			var ng_size := font.get_string_size(no_gold, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
-			draw_string(font, Vector2(400 - ng_size.x / 2, 308), no_gold,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.55, 0.4, 0.4))
+		var mt_sz := font.get_string_size(m_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 26)
+		draw_string(font, Vector2(400 - mt_sz.x / 2, 163), m_title,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.85, 0.2))
+		# Gold
+		var gd_str := "Gold: %d" % run_gold
+		var gd_sz := font.get_string_size(gd_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+		draw_string(font, Vector2(400 - gd_sz.x / 2, 187), gd_str,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
+		draw_line(Vector2(165, 200), Vector2(635, 200), Color(0.5, 0.42, 0.1, 0.45), 1.0)
+		# Items
+		var item_keys   := ["speed",               "attack",              "defense"             ]
+		var item_names  := ["Speed Boost",          "Attack Bonus",        "Defense Bonus"       ]
+		var item_descs  := ["+10% movement speed",  "+10% attack power",   "+10% defense"        ]
+		var item_colors := [Color(0.35, 0.75, 1.0), Color(1.0, 0.5, 0.25), Color(0.35, 0.9, 0.45)]
+		var item_ys     := [215,                    270,                   325                   ]
+		var buy_rects   := [Rect2(370, 214, 160, 32), Rect2(370, 269, 160, 32), Rect2(370, 324, 160, 32)]
+		var can_buy := run_gold >= 80
+		for i in range(3):
+			var lvl: int = run_upgrades.get(item_keys[i], 0)
+			var col: Color = item_colors[i]
+			var iy: int = item_ys[i]
+			# Icon
+			draw_rect(Rect2(175, iy, 18, 18), Color(0.1, 0.1, 0.14))
+			draw_rect(Rect2(175, iy, 18, 18), col, false, 1.0)
+			_draw_upgrade_icon_symbol(item_keys[i], Vector2(184, iy + 9), 5.5, col)
+			# Name + level
+			var name_str := "%s   Lv.%d" % [item_names[i], lvl]
+			draw_string(font, Vector2(200, iy + 13), name_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
+			# Desc
+			var desc_str: String = item_descs[i]
+			if lvl > 0:
+				desc_str += "  (now +%d%%)" % (lvl * 10)
+			draw_string(font, Vector2(200, iy + 27), desc_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.65, 0.65, 0.72))
+			# Buy button
+			var br: Rect2 = buy_rects[i]
+			draw_rect(br, Color(0.16, 0.13, 0.04) if can_buy else Color(0.1, 0.1, 0.1))
+			draw_rect(br, col if can_buy else Color(0.28, 0.28, 0.28), false, 1.5)
+			var bl := "Buy  80g"
+			var bl_sz := font.get_string_size(bl, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			draw_string(font, Vector2(br.position.x + (br.size.x - bl_sz.x) / 2, br.position.y + 22),
+				bl, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col if can_buy else Color(0.35, 0.35, 0.35))
+		draw_line(Vector2(165, 358), Vector2(635, 358), Color(0.5, 0.42, 0.1, 0.45), 1.0)
 		# Leave button
-		var leave_rect := Rect2(310, 315, 180, 40)
-		draw_rect(leave_rect, Color(0.12, 0.12, 0.18))
-		draw_rect(leave_rect, Color(0.35, 0.35, 0.5), false, 1.5)
-		var leave_label := "Leave Shop"
-		var ll_size := font.get_string_size(leave_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
-		draw_string(font, Vector2(leave_rect.position.x + (leave_rect.size.x - ll_size.x) / 2, leave_rect.position.y + 26),
-			leave_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.8, 0.85))
+		var leave_rect := Rect2(305, 376, 190, 34)
+		draw_rect(leave_rect, Color(0.1, 0.1, 0.16))
+		draw_rect(leave_rect, Color(0.3, 0.3, 0.45), false, 1.5)
+		var ll := "Leave Shop"
+		var ll_sz := font.get_string_size(ll, HORIZONTAL_ALIGNMENT_CENTER, -1, 15)
+		draw_string(font, Vector2(400 - ll_sz.x / 2, leave_rect.position.y + 23),
+			ll, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.75, 0.75, 0.85))
 	elif run_overlay == "run_over":
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, 0.6))
 		var msg := "RUN OVER"
@@ -1177,7 +1208,10 @@ func _update_moving_units(delta: float) -> void:
 		var dist: float = u["start_pos"].distance_to(u["end_pos"])
 		if dist < 1.0:
 			dist = 1.0
-		u["progress"] += (UNIT_SPEED / dist) * delta
+		var speed: float = UNIT_SPEED
+		if in_roguelike_run and u["owner"] == "player":
+			speed *= 1.0 + 0.1 * run_upgrades.get("speed", 0)
+		u["progress"] += (speed / dist) * delta
 		if u["progress"] >= 1.0:
 			_resolve_arrival(u)
 			resolved.append(i)
@@ -1582,11 +1616,17 @@ func _get_defender_multiplier(building: Dictionary) -> float:
 	if building["type"] == "tower":
 		return _get_tower_defense_multiplier(building["level"])
 	var forge_count: int = _count_forges_for_owner(building["owner"])
-	return (90.0 + building["level"] * 10.0 + forge_count * 10.0) / 100.0
+	var defense_bonus: float = 0.0
+	if in_roguelike_run and building["owner"] == "player":
+		defense_bonus = 10.0 * run_upgrades.get("defense", 0)
+	return (90.0 + building["level"] * 10.0 + forge_count * 10.0 + defense_bonus) / 100.0
 
 func _get_attacker_multiplier(owner: String) -> float:
 	var forge_count: int = _count_forges_for_owner(owner)
-	return (100.0 + forge_count * 10.0) / 100.0
+	var attack_bonus: float = 0.0
+	if in_roguelike_run and owner == "player":
+		attack_bonus = 10.0 * run_upgrades.get("attack", 0)
+	return (100.0 + forge_count * 10.0 + attack_bonus) / 100.0
 
 # === Win/Lose Conditions ===
 
@@ -1706,6 +1746,8 @@ func _upgrade_to_forge(b: Dictionary) -> void:
 # === Input ===
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		mouse_pos = event.position
 	if game_state == "level_select":
 		_input_level_select(event)
 		return
@@ -2211,6 +2253,78 @@ func _draw_context_menu() -> void:
 		var ty: float = r.position.y + (r.size.y + text_size.y) / 2.0 - 2.0
 		draw_string(font, Vector2(tx, ty), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, text_color)
 
+func _draw_upgrade_icon_symbol(key: String, center: Vector2, size: float, col: Color) -> void:
+	match key:
+		"speed":
+			var pts := PackedVector2Array([
+				center + Vector2(size, 0),
+				center + Vector2(-size * 0.6, -size * 0.75),
+				center + Vector2(-size * 0.6, size * 0.75),
+			])
+			draw_colored_polygon(pts, col)
+		"attack":
+			var lw: float = maxf(1.5, size * 0.38)
+			draw_line(center + Vector2(-size, -size), center + Vector2(size, size), col, lw)
+			draw_line(center + Vector2(size, -size), center + Vector2(-size, size), col, lw)
+		"defense":
+			var lw: float = maxf(1.0, size * 0.32)
+			draw_arc(center + Vector2(0, -size * 0.2), size * 0.9, PI, TAU, 12, col, lw)
+			draw_line(center + Vector2(-size * 0.9, -size * 0.2), center + Vector2(0, size * 0.9), col, lw)
+			draw_line(center + Vector2(size * 0.9, -size * 0.2), center + Vector2(0, size * 0.9), col, lw)
+
+func _draw_run_upgrade_icons(origin: Vector2, icon_size: float) -> void:
+	if not in_roguelike_run:
+		return
+	var font := ThemeDB.fallback_font
+	var keys   := ["speed",              "attack",             "defense"            ]
+	var colors := [Color(0.35, 0.75, 1.0), Color(1.0, 0.5, 0.25), Color(0.35, 0.9, 0.45)]
+	var tip_names := ["Speed Boost",  "Attack Bonus",  "Defense Bonus" ]
+	var tip_descs := ["+10% movement speed per level", "+10% attack power per level", "+10% defense per level"]
+	var spacing: float = icon_size + 4.0
+
+	# Find which icon is hovered
+	var hovered: int = -1
+	for i in range(3):
+		if Rect2(origin.x + i * spacing, origin.y, icon_size, icon_size).has_point(mouse_pos):
+			hovered = i
+
+	# Draw icons
+	for i in range(3):
+		var lvl: int = run_upgrades.get(keys[i], 0)
+		var col: Color = colors[i] if lvl > 0 else Color(0.28, 0.28, 0.32)
+		var border: Color = colors[i] if lvl > 0 else Color(0.3, 0.3, 0.35)
+		var ix: float = origin.x + i * spacing
+		var iy: float = origin.y
+		draw_rect(Rect2(ix, iy, icon_size, icon_size), Color(0.1, 0.1, 0.14))
+		draw_rect(Rect2(ix, iy, icon_size, icon_size), border, false, 1.0)
+		_draw_upgrade_icon_symbol(keys[i], Vector2(ix + icon_size * 0.5, iy + icon_size * 0.5), icon_size * 0.3, col)
+		if lvl > 0:
+			var lv_str := str(lvl)
+			var lv_sz := font.get_string_size(lv_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 9)
+			draw_string(font, Vector2(ix + icon_size - lv_sz.x - 1, iy + icon_size - 1),
+				lv_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 1.0, 1.0, 0.95))
+
+	# Tooltip for hovered icon
+	if hovered >= 0:
+		var lvl: int = run_upgrades.get(keys[hovered], 0)
+		var ix: float = origin.x + hovered * spacing
+		var iy: float = origin.y
+		var tip_w: float = 182.0
+		var tip_h: float = 44.0
+		var tip_x: float = clampf(ix - 8, 5, SCREEN_W - tip_w - 5)
+		var tip_y: float = iy + icon_size + 3.0
+		if tip_y + tip_h > SCREEN_H - 10:
+			tip_y = iy - tip_h - 3.0
+		draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), Color(0.08, 0.08, 0.12, 0.97))
+		draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), colors[hovered], false, 1.0)
+		draw_string(font, Vector2(tip_x + 6, tip_y + 14), tip_names[hovered],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, colors[hovered])
+		draw_string(font, Vector2(tip_x + 6, tip_y + 27), tip_descs[hovered],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.75, 0.8))
+		var total_str := "Current: +" + str(lvl * 10) + "%"
+		draw_string(font, Vector2(tip_x + 6, tip_y + 40), total_str,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.55, 0.88, 0.55) if lvl > 0 else Color(0.45, 0.45, 0.5))
+
 func _draw_hud() -> void:
 	var font := ThemeDB.fallback_font
 
@@ -2259,6 +2373,8 @@ func _draw_hud() -> void:
 		var rgold_text := "Gold: %d" % run_gold
 		draw_string(font, Vector2(rbar_x + 4, rbar_y + 33), rgold_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.85, 0.2))
+		# Upgrade icons (3 small icons to the left of the panel)
+		_draw_run_upgrade_icons(Vector2(rbar_x - 58, rbar_y + 4), 14.0)
 
 	# Instructions
 	var help_text: String = "Click: menu  |  Right-click: quick upgrade  |  Drag: send  |  Forges: +10% str  |  Towers: shoot enemies"
