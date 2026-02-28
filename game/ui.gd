@@ -984,9 +984,12 @@ func draw_hero_power_hud(font: Font) -> void:
 	var btn_start_x: float = (GameData.SCREEN_W - total_btn_w) / 2.0
 	var btn_y: float = ebar_y + ebar_h + 16.0
 
+	var hovered_power: int = -1
 	for i in range(4):
 		var bx: float = btn_start_x + i * (btn_w + btn_gap)
 		var power: Dictionary = powers[i]
+		if Rect2(bx, btn_y, btn_w, btn_h).has_point(main.mouse_pos):
+			hovered_power = i
 		var affordable: bool = main.hero_energy >= power["cost"]
 		var on_cooldown: bool = main.hero_power_cooldowns[i] > 0.0
 		var is_targeting: bool = main.hero_targeting_power == i
@@ -1033,6 +1036,16 @@ func draw_hero_power_hud(font: Font) -> void:
 			var cd_str := "%.1fs" % main.hero_power_cooldowns[i]
 			main.draw_string(font, Vector2(bx + 30, btn_y + 26), cd_str,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.4, 0.4))
+
+	if hovered_power >= 0 and main.hero_targeting_power < 0:
+		var hp: Dictionary = powers[hovered_power]
+		var tip: String = hp["name"] + " — " + hp["desc"]
+		var tip_size := font.get_string_size(tip, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+		var tip_x: float = GameData.SCREEN_W / 2 - tip_size.x / 2
+		var tip_y: float = btn_y + btn_h + 4
+		main.draw_rect(Rect2(tip_x - 4, tip_y - 1, tip_size.x + 8, 16), Color(0.05, 0.05, 0.1, 0.9))
+		main.draw_string(font, Vector2(tip_x, tip_y + 11), tip,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.85, 0.9))
 
 	if main.hero_targeting_power >= 0:
 		var target_text: String = "Select target..."
