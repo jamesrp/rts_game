@@ -331,8 +331,6 @@ func _start_roguelike_battle(col: int) -> void:
 			_: ai_level = 3 + (randi() % 2)
 		# Later rows within an act push toward higher difficulty
 		ai_level += run_current_row / 2
-		if is_elite:
-			ai_level += 1
 		ai_level = clampi(ai_level, 1, 4)
 	in_roguelike_run = true
 	var config: Dictionary = _generate_roguelike_battle_map(ai_level, is_elite)
@@ -813,7 +811,7 @@ func _get_ai_level(level: int) -> Dictionary:
 func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary:
 	var node_count: int = randi_range(10, 14) + ai_level
 	if is_elite:
-		node_count += 2
+		node_count += 1
 	node_count = mini(node_count, 18)
 
 	# Pick a layout strategy
@@ -891,7 +889,7 @@ func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary
 	if is_elite:
 		for oi in opponent_indices:
 			if oi != opponent_indices[0]:
-				upgrades[oi] = 2
+				upgrades[oi] = 1
 
 	return {"positions": positions, "units": units, "player_indices": player_indices,
 		"opponent_indices": opponent_indices, "forges": forges, "towers": towers, "upgrades": upgrades}
