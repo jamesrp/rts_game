@@ -67,6 +67,64 @@ var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
 var run_overlay: String = ""  # "", "run_over", "run_won", "merchant"
 
+# === Hero System ===
+var run_hero: String = ""  # "commander", "warden", "saboteur", "architect"
+var hero_energy: float = 0.0
+var hero_max_energy: float = 100.0
+var hero_energy_rate: float = 2.0  # per second passive
+var hero_power_cooldowns: Array = [0.0, 0.0, 0.0, 0.0]
+var hero_active_effects: Array = []  # [{type, timer, duration, ...}]
+var hero_targeting_power: int = -1  # power index awaiting target click
+var hero_supply_first_node: int = -1  # for Supply Line two-click targeting
+var hero_minefield_source: int = -1  # for Minefield path targeting
+
+const HERO_DATA: Dictionary = {
+	"commander": {
+		"name": "Commander",
+		"color": Color(0.9, 0.3, 0.2),
+		"desc": "Offensive leader: rally troops, boost speed, conscript units",
+		"powers": [
+			{"name": "Rally Cry", "cost": 15, "cooldown": 3.0, "desc": "All nodes send 30% to target", "targeting": "any_node"},
+			{"name": "Forced March", "cost": 15, "cooldown": 5.0, "desc": "Units move 2x speed for 8s", "targeting": "instant"},
+			{"name": "Conscription", "cost": 35, "cooldown": 8.0, "desc": "All nodes gain bonus units", "targeting": "instant"},
+			{"name": "Blitz", "cost": 60, "cooldown": 20.0, "desc": "2x attack + instant gen for 12s", "targeting": "instant"},
+		]
+	},
+	"warden": {
+		"name": "Warden",
+		"color": Color(0.2, 0.7, 0.9),
+		"desc": "Defensive guardian: fortify nodes, lay traps, build citadels",
+		"powers": [
+			{"name": "Fortify", "cost": 15, "cooldown": 5.0, "desc": "Node invulnerable 8s", "targeting": "friendly_node"},
+			{"name": "Entrench", "cost": 15, "cooldown": 5.0, "desc": "Node +50% defense 15s", "targeting": "friendly_node"},
+			{"name": "Minefield", "cost": 35, "cooldown": 10.0, "desc": "Enemies on path lose 40%", "targeting": "path"},
+			{"name": "Citadel", "cost": 60, "cooldown": 25.0, "desc": "2x cap + 3x gen 20s", "targeting": "friendly_node"},
+		]
+	},
+	"saboteur": {
+		"name": "Saboteur",
+		"color": Color(0.6, 0.2, 0.8),
+		"desc": "Disruption specialist: sabotage, slow, convert enemy forces",
+		"powers": [
+			{"name": "Sabotage", "cost": 15, "cooldown": 5.0, "desc": "Enemy node stops gen 12s", "targeting": "enemy_node"},
+			{"name": "Blackout", "cost": 15, "cooldown": 5.0, "desc": "Enemy transit slowed 50% 10s", "targeting": "instant"},
+			{"name": "Turncoat", "cost": 35, "cooldown": 12.0, "desc": "Convert 30% of enemy units", "targeting": "enemy_node"},
+			{"name": "EMP", "cost": 60, "cooldown": 25.0, "desc": "All enemy gen+transit stop 10s", "targeting": "instant"},
+		]
+	},
+	"architect": {
+		"name": "Architect",
+		"color": Color(0.2, 0.8, 0.4),
+		"desc": "Economy master: overclock production, upgrade, share resources",
+		"powers": [
+			{"name": "Overclock", "cost": 15, "cooldown": 5.0, "desc": "Node 3x gen for 12s", "targeting": "friendly_node"},
+			{"name": "Supply Line", "cost": 15, "cooldown": 8.0, "desc": "Two nodes share units 15s", "targeting": "friendly_node_pair"},
+			{"name": "Terraform", "cost": 35, "cooldown": 12.0, "desc": "Instantly upgrade node +2", "targeting": "friendly_node"},
+			{"name": "Nexus", "cost": 60, "cooldown": 25.0, "desc": "All nodes gen at max level 15s", "targeting": "instant"},
+		]
+	},
+}
+
 # === Mouse State ===
 var mouse_pos: Vector2 = Vector2.ZERO
 
@@ -154,6 +212,7 @@ func _start_roguelike_run() -> void:
 	run_current_row = 0
 	run_last_node = -1
 	run_overlay = ""
+	_reset_hero_battle_state()
 	run_map = _generate_run_map(run_act)
 	game_state = "roguelike_map"
 
@@ -286,6 +345,10 @@ func _return_from_roguelike_battle() -> void:
 	dispatch_queues.clear()
 	moving_units.clear()
 	visual_effects.clear()
+	hero_active_effects.clear()
+	hero_targeting_power = -1
+	hero_supply_first_node = -1
+	hero_minefield_source = -1
 	context_menu_building_id = -1
 	context_menu_options.clear()
 	in_roguelike_run = false
@@ -932,6 +995,7 @@ func _start_level(mode: String, level: int, config_override: Dictionary = {}) ->
 	dispatch_queues.clear()
 	moving_units.clear()
 	visual_effects.clear()
+	_reset_hero_battle_state()
 	selected_building_id = -1
 	is_dragging = false
 	drag_source_id = -1
@@ -996,7 +1060,7 @@ func _return_to_menu() -> void:
 # === Main Loop ===
 
 func _process(delta: float) -> void:
-	if game_state == "level_select":
+	if game_state == "level_select" or game_state == "hero_select":
 		queue_redraw()
 		return
 	if game_state == "roguelike_map":
@@ -1017,6 +1081,8 @@ func _process(delta: float) -> void:
 	_update_dispatch_queues(delta)
 	_update_moving_units(delta)
 	_update_visual_effects(delta)
+	if in_roguelike_run and run_hero != "":
+		_update_hero_system(delta)
 	if current_mode == "ai":
 		_update_ai(delta)
 	_check_win_condition()
@@ -1032,16 +1098,374 @@ func _update_visual_effects(delta: float) -> void:
 	for idx in to_remove:
 		visual_effects.remove_at(idx)
 
+func _update_hero_system(delta: float) -> void:
+	# Passive energy regen
+	hero_energy = minf(hero_energy + hero_energy_rate * delta, hero_max_energy)
+	# Tick cooldowns
+	for i in range(4):
+		if hero_power_cooldowns[i] > 0.0:
+			hero_power_cooldowns[i] = maxf(0.0, hero_power_cooldowns[i] - delta)
+	# Update active effects - tick timers and apply periodic effects
+	var effects_to_remove: Array = []
+	for i in range(hero_active_effects.size()):
+		var fx: Dictionary = hero_active_effects[i]
+		fx["timer"] += delta
+		# Supply Line periodic equalization
+		if fx["type"] == "supply_line" and fx["timer"] < fx["duration"]:
+			fx["equalize_timer"] = fx.get("equalize_timer", 0.0) + delta
+			if fx["equalize_timer"] >= 2.0:
+				fx["equalize_timer"] -= 2.0
+				_apply_supply_line_equalize(fx)
+		if fx["timer"] >= fx["duration"]:
+			effects_to_remove.append(i)
+	effects_to_remove.reverse()
+	for idx in effects_to_remove:
+		hero_active_effects.remove_at(idx)
+
+func _reset_hero_battle_state() -> void:
+	hero_energy = 0.0
+	hero_power_cooldowns = [0.0, 0.0, 0.0, 0.0]
+	hero_active_effects.clear()
+	hero_targeting_power = -1
+	hero_supply_first_node = -1
+	hero_minefield_source = -1
+
+func _apply_supply_line_equalize(fx: Dictionary) -> void:
+	var id_a: int = fx["node_a"]
+	var id_b: int = fx["node_b"]
+	if id_a < 0 or id_a >= buildings.size() or id_b < 0 or id_b >= buildings.size():
+		return
+	var a: Dictionary = buildings[id_a]
+	var b: Dictionary = buildings[id_b]
+	if a["owner"] != "player" or b["owner"] != "player":
+		return
+	var total: int = a["units"] + b["units"]
+	var half: int = total / 2
+	a["units"] = half
+	b["units"] = total - half
+
+func _try_activate_hero_power(index: int) -> void:
+	if run_hero == "" or not HERO_DATA.has(run_hero):
+		return
+	var powers: Array = HERO_DATA[run_hero]["powers"]
+	if index < 0 or index >= powers.size():
+		return
+	var power: Dictionary = powers[index]
+	if hero_energy < power["cost"] or hero_power_cooldowns[index] > 0.0:
+		return
+	var targeting: String = power["targeting"]
+	if targeting == "instant":
+		_activate_hero_power(index, -1)
+	else:
+		# Enter targeting mode
+		hero_targeting_power = index
+		hero_supply_first_node = -1
+		hero_minefield_source = -1
+
+func _handle_hero_target_click(pos: Vector2) -> void:
+	if hero_targeting_power < 0 or run_hero == "":
+		return
+	var powers: Array = HERO_DATA[run_hero]["powers"]
+	var power: Dictionary = powers[hero_targeting_power]
+	var targeting: String = power["targeting"]
+	var clicked_id: int = _get_building_at(pos)
+
+	if targeting == "any_node":
+		if clicked_id >= 0:
+			_activate_hero_power(hero_targeting_power, clicked_id)
+			hero_targeting_power = -1
+	elif targeting == "friendly_node":
+		if clicked_id >= 0 and buildings[clicked_id]["owner"] == "player":
+			_activate_hero_power(hero_targeting_power, clicked_id)
+			hero_targeting_power = -1
+	elif targeting == "enemy_node":
+		if clicked_id >= 0 and buildings[clicked_id]["owner"] == "opponent":
+			_activate_hero_power(hero_targeting_power, clicked_id)
+			hero_targeting_power = -1
+	elif targeting == "friendly_node_pair":
+		# Two-click: first friendly, then second friendly
+		if clicked_id >= 0 and buildings[clicked_id]["owner"] == "player":
+			if hero_supply_first_node < 0:
+				hero_supply_first_node = clicked_id
+			elif clicked_id != hero_supply_first_node:
+				_activate_hero_power_pair(hero_targeting_power, hero_supply_first_node, clicked_id)
+				hero_targeting_power = -1
+				hero_supply_first_node = -1
+	elif targeting == "path":
+		# Minefield: click two nodes to define path
+		if clicked_id >= 0:
+			if hero_minefield_source < 0:
+				hero_minefield_source = clicked_id
+			elif clicked_id != hero_minefield_source:
+				_activate_hero_power_pair(hero_targeting_power, hero_minefield_source, clicked_id)
+				hero_targeting_power = -1
+				hero_minefield_source = -1
+
+func _activate_hero_power(index: int, target_id: int) -> void:
+	var powers: Array = HERO_DATA[run_hero]["powers"]
+	var power: Dictionary = powers[index]
+	hero_energy -= power["cost"]
+	hero_power_cooldowns[index] = power["cooldown"]
+	sfx_click.play()
+
+	# Add visual flash
+	visual_effects.append({
+		"type": "power_flash",
+		"position": Vector2(SCREEN_W / 2, 40),
+		"timer": 0.0,
+		"duration": 0.5,
+		"color": HERO_DATA[run_hero]["color"],
+	})
+
+	match run_hero:
+		"commander":
+			match index:
+				0: _power_rally_cry(target_id)
+				1: _power_forced_march()
+				2: _power_conscription()
+				3: _power_blitz()
+		"warden":
+			match index:
+				0: _power_fortify(target_id)
+				1: _power_entrench(target_id)
+				3: _power_citadel(target_id)
+		"saboteur":
+			match index:
+				0: _power_sabotage(target_id)
+				1: _power_blackout()
+				2: _power_turncoat(target_id)
+				3: _power_emp()
+		"architect":
+			match index:
+				0: _power_overclock(target_id)
+				2: _power_terraform(target_id)
+				3: _power_nexus()
+
+func _activate_hero_power_pair(index: int, node_a: int, node_b: int) -> void:
+	var powers: Array = HERO_DATA[run_hero]["powers"]
+	var power: Dictionary = powers[index]
+	hero_energy -= power["cost"]
+	hero_power_cooldowns[index] = power["cooldown"]
+	sfx_click.play()
+
+	visual_effects.append({
+		"type": "power_flash",
+		"position": Vector2(SCREEN_W / 2, 40),
+		"timer": 0.0,
+		"duration": 0.5,
+		"color": HERO_DATA[run_hero]["color"],
+	})
+
+	match run_hero:
+		"warden":
+			if index == 2: _power_minefield(node_a, node_b)
+		"architect":
+			if index == 1: _power_supply_line(node_a, node_b)
+
+# === Hero Power Implementations ===
+
+# Commander powers
+func _power_rally_cry(target_id: int) -> void:
+	for b in buildings:
+		if b["owner"] == "player" and b["id"] != target_id and b["type"] != "forge" and b["type"] != "tower":
+			var send_count: int = int(b["units"] * 0.3)
+			if send_count > 0:
+				dispatch_queues.append({
+					"source_id": b["id"],
+					"target_id": target_id,
+					"owner": "player",
+					"remaining": send_count,
+					"wave_timer": 0.0,
+					"start_pos": b["position"],
+					"end_pos": buildings[target_id]["position"],
+				})
+
+func _power_forced_march() -> void:
+	hero_active_effects.append({
+		"type": "forced_march",
+		"timer": 0.0,
+		"duration": 8.0,
+	})
+
+func _power_conscription() -> void:
+	for b in buildings:
+		if b["owner"] == "player" and b["type"] != "forge" and b["type"] != "tower":
+			var bonus: int = b["level"] * 3
+			b["units"] += bonus
+
+func _power_blitz() -> void:
+	hero_active_effects.append({
+		"type": "blitz",
+		"timer": 0.0,
+		"duration": 12.0,
+	})
+
+# Warden powers
+func _power_fortify(target_id: int) -> void:
+	hero_active_effects.append({
+		"type": "fortify",
+		"timer": 0.0,
+		"duration": 8.0,
+		"target_id": target_id,
+	})
+
+func _power_entrench(target_id: int) -> void:
+	hero_active_effects.append({
+		"type": "entrench",
+		"timer": 0.0,
+		"duration": 15.0,
+		"target_id": target_id,
+	})
+
+func _power_minefield(node_a: int, node_b: int) -> void:
+	var pos_a: Vector2 = buildings[node_a]["position"]
+	var pos_b: Vector2 = buildings[node_b]["position"]
+	hero_active_effects.append({
+		"type": "minefield",
+		"timer": 0.0,
+		"duration": 60.0,  # Long duration, but one-shot
+		"node_a": node_a,
+		"node_b": node_b,
+		"mid_pos": (pos_a + pos_b) / 2.0,
+		"triggered": false,
+	})
+
+func _power_citadel(target_id: int) -> void:
+	hero_active_effects.append({
+		"type": "citadel",
+		"timer": 0.0,
+		"duration": 20.0,
+		"target_id": target_id,
+	})
+
+# Saboteur powers
+func _power_sabotage(target_id: int) -> void:
+	hero_active_effects.append({
+		"type": "sabotage",
+		"timer": 0.0,
+		"duration": 12.0,
+		"target_id": target_id,
+	})
+
+func _power_blackout() -> void:
+	hero_active_effects.append({
+		"type": "blackout",
+		"timer": 0.0,
+		"duration": 10.0,
+	})
+
+func _power_turncoat(target_id: int) -> void:
+	var target: Dictionary = buildings[target_id]
+	var convert_count: int = int(target["units"] * 0.3)
+	if convert_count > 0:
+		target["units"] -= convert_count
+		# Send converted units to nearest player building
+		var nearest_id: int = -1
+		var nearest_dist: float = INF
+		for b in buildings:
+			if b["owner"] == "player":
+				var d: float = b["position"].distance_to(target["position"])
+				if d < nearest_dist:
+					nearest_dist = d
+					nearest_id = b["id"]
+		if nearest_id >= 0:
+			for _i in range(convert_count):
+				moving_units.append({
+					"source_id": target_id,
+					"target_id": nearest_id,
+					"owner": "player",
+					"progress": 0.0,
+					"start_pos": target["position"],
+					"end_pos": buildings[nearest_id]["position"],
+					"lateral_offset": (randf() - 0.5) * 10.0,
+				})
+
+func _power_emp() -> void:
+	hero_active_effects.append({
+		"type": "emp",
+		"timer": 0.0,
+		"duration": 10.0,
+	})
+
+# Architect powers
+func _power_overclock(target_id: int) -> void:
+	hero_active_effects.append({
+		"type": "overclock",
+		"timer": 0.0,
+		"duration": 12.0,
+		"target_id": target_id,
+	})
+
+func _power_supply_line(node_a: int, node_b: int) -> void:
+	hero_active_effects.append({
+		"type": "supply_line",
+		"timer": 0.0,
+		"duration": 15.0,
+		"node_a": node_a,
+		"node_b": node_b,
+		"equalize_timer": 0.0,
+	})
+
+func _power_terraform(target_id: int) -> void:
+	var b: Dictionary = buildings[target_id]
+	if b["type"] != "forge" and b["type"] != "tower":
+		b["level"] = mini(b["level"] + 2, MAX_BUILDING_LEVEL)
+		b["max_capacity"] = BASE_CAPACITY * b["level"]
+		sfx_upgrade.play()
+
+func _power_nexus() -> void:
+	hero_active_effects.append({
+		"type": "nexus",
+		"timer": 0.0,
+		"duration": 15.0,
+	})
+
+func _has_hero_effect(effect_type: String) -> bool:
+	for fx in hero_active_effects:
+		if fx["type"] == effect_type and fx["timer"] < fx["duration"]:
+			return true
+	return false
+
+func _has_hero_effect_on(effect_type: String, node_id: int) -> bool:
+	for fx in hero_active_effects:
+		if fx["type"] == effect_type and fx.get("target_id", -1) == node_id and fx["timer"] < fx["duration"]:
+			return true
+	return false
+
 func _update_unit_generation(delta: float) -> void:
+	# Find highest player node level for Nexus effect
+	var nexus_active: bool = _has_hero_effect("nexus")
+	var highest_level: int = 1
+	if nexus_active:
+		for b in buildings:
+			if b["owner"] == "player" and b["type"] != "forge" and b["type"] != "tower":
+				highest_level = maxi(highest_level, b["level"])
+
 	for b in buildings:
 		if b["type"] == "forge" or b["type"] == "tower":
 			continue
+		# Check Sabotage / EMP: skip generation for affected enemy nodes
+		if b["owner"] == "opponent":
+			if _has_hero_effect_on("sabotage", b["id"]) or _has_hero_effect("emp"):
+				continue
 		var level: int = b["level"]
+		# Nexus: player nodes gen at highest level
+		if nexus_active and b["owner"] == "player":
+			level = highest_level
+		var gen_mult: float = 1.0
+		# Overclock: 3x gen rate
+		if b["owner"] == "player" and _has_hero_effect_on("overclock", b["id"]):
+			gen_mult *= 3.0
+		# Citadel: 3x gen rate and 2x cap
+		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
+			gen_mult *= 3.0
 		var max_cap: int = BASE_CAPACITY * level
+		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
+			max_cap *= 2
 		b["max_capacity"] = max_cap
 		if b["units"] >= max_cap:
 			continue
-		b["gen_timer"] += delta
+		b["gen_timer"] += delta * gen_mult
 		var interval: float = 2.0 / level
 		while b["gen_timer"] >= interval and b["units"] < max_cap:
 			b["gen_timer"] -= interval
@@ -1143,6 +1567,13 @@ func _update_dispatch_queues(delta: float) -> void:
 		dispatch_queues.remove_at(idx)
 
 func _update_moving_units(delta: float) -> void:
+	var forced_march: bool = _has_hero_effect("forced_march")
+	var blackout: bool = _has_hero_effect("blackout")
+	var emp: bool = _has_hero_effect("emp")
+
+	# Check minefields against enemy units
+	_check_minefields()
+
 	var resolved: Array = []
 	for i in range(moving_units.size()):
 		var u: Dictionary = moving_units[i]
@@ -1152,6 +1583,15 @@ func _update_moving_units(delta: float) -> void:
 		var speed: float = UNIT_SPEED
 		if in_roguelike_run and u["owner"] == "player":
 			speed *= 1.0 + 0.1 * run_upgrades.get("speed", 0)
+		# Forced March: player units move 2x
+		if forced_march and u["owner"] == "player":
+			speed *= 2.0
+		# Blackout: enemy transit slowed 50%
+		if blackout and u["owner"] == "opponent":
+			speed *= 0.5
+		# EMP: enemy transit frozen
+		if emp and u["owner"] == "opponent":
+			speed = 0.0
 		u["progress"] += (speed / dist) * delta
 		if u["progress"] >= 1.0:
 			_resolve_arrival(u)
@@ -1159,6 +1599,39 @@ func _update_moving_units(delta: float) -> void:
 	resolved.reverse()
 	for idx in resolved:
 		moving_units.remove_at(idx)
+
+func _check_minefields() -> void:
+	for fx in hero_active_effects:
+		if fx["type"] != "minefield" or fx.get("triggered", false):
+			continue
+		var mid: Vector2 = fx["mid_pos"]
+		var mine_radius: float = 40.0
+		var units_to_remove: Array = []
+		for i in range(moving_units.size()):
+			var u: Dictionary = moving_units[i]
+			if u["owner"] != "opponent":
+				continue
+			var unit_pos: Vector2 = u["start_pos"].lerp(u["end_pos"], u["progress"])
+			if unit_pos.distance_to(mid) <= mine_radius:
+				units_to_remove.append(i)
+		if units_to_remove.size() > 0:
+			fx["triggered"] = true
+			# Remove 40% of the caught units
+			var kill_count: int = maxi(1, int(units_to_remove.size() * 0.4))
+			units_to_remove.shuffle()
+			var killed: Array = units_to_remove.slice(0, kill_count)
+			killed.sort()
+			killed.reverse()
+			for idx in killed:
+				moving_units.remove_at(idx)
+			# Visual effect
+			visual_effects.append({
+				"type": "capture_pop",
+				"position": mid,
+				"timer": 0.0,
+				"duration": 0.6,
+				"color": Color(1.0, 0.3, 0.1),
+			})
 
 func _get_fractional(building: Dictionary) -> float:
 	if game_time - building["fractional_timestamp"] >= 10.0:
@@ -1172,6 +1645,10 @@ func _resolve_arrival(unit_data: Dictionary) -> void:
 		# Reinforce
 		target["units"] += 1
 	else:
+		# Fortify: node is invulnerable
+		if _has_hero_effect_on("fortify", unit_data["target_id"]) and target["owner"] == "player":
+			return  # Attack absorbed
+
 		# Combat with multipliers — single unit arriving
 		var A: float = 1.0
 		var D: float = float(target["units"]) + _get_fractional(target)
@@ -1184,14 +1661,21 @@ func _resolve_arrival(unit_data: Dictionary) -> void:
 
 		if defender_remaining >= attacker_remaining:
 			# Defender holds
+			var prev_units: int = target["units"]
 			target["units"] = maxi(0, int(floor(defender_remaining)))
 			target["units_fractional"] = defender_remaining - float(target["units"])
 			target["fractional_timestamp"] = game_time
+			# Energy gain: player kills enemy defending units
+			if in_roguelike_run and unit_data["owner"] == "player":
+				var killed: int = prev_units - target["units"]
+				if killed > 0:
+					hero_energy = minf(hero_energy + killed, hero_max_energy)
 		else:
 			# Attacker captures
 			target["units"] = maxi(1, int(floor(attacker_remaining)))
 			target["units_fractional"] = attacker_remaining - float(target["units"])
 			target["fractional_timestamp"] = game_time
+			var old_owner: String = target["owner"]
 			target["owner"] = unit_data["owner"]
 			if target["type"] != "forge" and target["type"] != "tower":
 				target["level"] = 1
@@ -1200,6 +1684,9 @@ func _resolve_arrival(unit_data: Dictionary) -> void:
 			target["upgrade_progress"] = 0.0
 			target["upgrade_duration"] = 0.0
 			sfx_capture.play()
+			# Energy gain from capturing
+			if in_roguelike_run and unit_data["owner"] == "player" and old_owner != "player":
+				hero_energy = minf(hero_energy + 8.0, hero_max_energy)
 			visual_effects.append({
 				"type": "capture_pop",
 				"position": target["position"],
@@ -1557,14 +2044,22 @@ func _get_defender_multiplier(building: Dictionary) -> float:
 	var defense_bonus: float = 0.0
 	if in_roguelike_run and building["owner"] == "player":
 		defense_bonus = 10.0 * run_upgrades.get("defense", 0)
-	return (90.0 + building["level"] * 10.0 + forge_count * 10.0 + defense_bonus) / 100.0
+	var base: float = (90.0 + building["level"] * 10.0 + forge_count * 10.0 + defense_bonus) / 100.0
+	# Entrench: +50% defense
+	if building["owner"] == "player" and _has_hero_effect_on("entrench", building["id"]):
+		base *= 1.5
+	return base
 
 func _get_attacker_multiplier(owner: String) -> float:
 	var forge_count: int = _count_forges_for_owner(owner)
 	var attack_bonus: float = 0.0
 	if in_roguelike_run and owner == "player":
 		attack_bonus = 10.0 * run_upgrades.get("attack", 0)
-	return (100.0 + forge_count * 10.0 + attack_bonus) / 100.0
+	var base: float = (100.0 + forge_count * 10.0 + attack_bonus) / 100.0
+	# Blitz: 2x attack
+	if owner == "player" and _has_hero_effect("blitz"):
+		base *= 2.0
+	return base
 
 # === Win/Lose Conditions ===
 
@@ -1687,6 +2182,9 @@ func _input(event: InputEvent) -> void:
 	if game_state == "level_select":
 		_input_level_select(event)
 		return
+	if game_state == "hero_select":
+		_input_hero_select(event)
+		return
 	if game_state == "roguelike_map":
 		_input_roguelike_map(event)
 		return
@@ -1699,13 +2197,39 @@ func _input(event: InputEvent) -> void:
 				_return_to_menu()
 		return
 
+	# Hero power hotkeys (1-4) and targeting
+	if in_roguelike_run and run_hero != "" and event is InputEventKey and event.pressed:
+		if event.keycode == KEY_ESCAPE and hero_targeting_power >= 0:
+			hero_targeting_power = -1
+			hero_supply_first_node = -1
+			hero_minefield_source = -1
+			return
+		var key_index: int = -1
+		if event.keycode == KEY_1: key_index = 0
+		elif event.keycode == KEY_2: key_index = 1
+		elif event.keycode == KEY_3: key_index = 2
+		elif event.keycode == KEY_4: key_index = 3
+		if key_index >= 0:
+			_try_activate_hero_power(key_index)
+			return
+
+	# Hero power targeting click
+	if hero_targeting_power >= 0 and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_handle_hero_target_click(event.position)
+		return
+
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_handle_left_press(event.position)
 		else:
 			_handle_left_release(event.position)
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		_handle_right_click(event.position)
+		if hero_targeting_power >= 0:
+			hero_targeting_power = -1
+			hero_supply_first_node = -1
+			hero_minefield_source = -1
+		else:
+			_handle_right_click(event.position)
 	elif event is InputEventMouseMotion and is_dragging:
 		drag_current_pos = event.position
 
@@ -1715,7 +2239,7 @@ func _input_level_select(event: InputEvent) -> void:
 			if btn["rect"].has_point(event.position):
 				sfx_click.play()
 				if btn["mode"] == "roguelike":
-					_start_roguelike_run()
+					game_state = "hero_select"
 				else:
 					_start_level(btn["mode"], btn["level"])
 				return
@@ -1843,6 +2367,9 @@ func _draw() -> void:
 	if game_state == "level_select":
 		_draw_level_select()
 		return
+	if game_state == "hero_select":
+		_draw_hero_select()
+		return
 	if game_state == "roguelike_map":
 		_draw_roguelike_map()
 		return
@@ -1850,10 +2377,50 @@ func _draw() -> void:
 	_draw_dispatch_queue_lines()
 	_draw_drag_line()
 	_draw_buildings()
+	_draw_hero_effects()
 	_draw_moving_units()
 	_draw_visual_effects()
 	_draw_context_menu()
 	_draw_hud()
+
+func _draw_hero_effects() -> void:
+	if not in_roguelike_run or run_hero == "":
+		return
+	var font := ThemeDB.fallback_font
+	for fx in hero_active_effects:
+		if fx["type"] == "minefield" and not fx.get("triggered", false):
+			var mid: Vector2 = fx["mid_pos"]
+			var pulse: float = 0.4 + 0.3 * sin(game_time * 4.0)
+			draw_circle(mid, 6.0, Color(1.0, 0.3, 0.1, pulse))
+			draw_arc(mid, 12.0, 0, TAU, 24, Color(1.0, 0.4, 0.2, pulse * 0.5), 1.5)
+			draw_string(font, mid + Vector2(-4, -10), "M",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.5, 0.2, pulse))
+		elif fx["type"] == "supply_line":
+			var id_a: int = fx["node_a"]
+			var id_b: int = fx["node_b"]
+			if id_a >= 0 and id_a < buildings.size() and id_b >= 0 and id_b < buildings.size():
+				var pa: Vector2 = buildings[id_a]["position"]
+				var pb: Vector2 = buildings[id_b]["position"]
+				var pulse2: float = 0.3 + 0.3 * sin(game_time * 3.0)
+				draw_line(pa, pb, Color(0.2, 0.8, 0.4, pulse2), 2.0)
+	# Global effect indicators at top
+	var gfx_y: float = 72.0
+	var hero_color: Color = HERO_DATA.get(run_hero, {}).get("color", Color.WHITE)
+	for fx in hero_active_effects:
+		var label: String = ""
+		match fx["type"]:
+			"forced_march": label = "Forced March"
+			"blitz": label = "BLITZ"
+			"blackout": label = "Blackout"
+			"emp": label = "EMP"
+			"nexus": label = "Nexus"
+		if label != "":
+			var remaining: float = fx["duration"] - fx["timer"]
+			var full_str := "%s %.1fs" % [label, remaining]
+			var str_size := font.get_string_size(full_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			draw_string(font, Vector2(SCREEN_W / 2 - str_size.x / 2, gfx_y), full_str,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, hero_color)
+			gfx_y += 14.0
 
 # === Level Select Drawing ===
 
@@ -1928,6 +2495,131 @@ func _draw_level_select() -> void:
 			r.position.y + (r.size.y + label_size.y) / 2 - 2), label,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, text_color)
 
+# === Hero Select Screen ===
+
+func _draw_hero_select() -> void:
+	_draw_background()
+	var font := ThemeDB.fallback_font
+
+	var title := "CHOOSE YOUR HERO"
+	var title_size := font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
+	draw_string(font, Vector2(400 - title_size.x / 2, 50), title,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.9, 0.9, 0.95))
+
+	var heroes: Array = ["commander", "warden", "saboteur", "architect"]
+	var card_w: float = 170.0
+	var card_h: float = 420.0
+	var gap: float = 12.0
+	var total_w: float = card_w * 4 + gap * 3
+	var start_x: float = (SCREEN_W - total_w) / 2.0
+	var card_y: float = 70.0
+
+	for i in range(4):
+		var hero_key: String = heroes[i]
+		var data: Dictionary = HERO_DATA[hero_key]
+		var cx: float = start_x + i * (card_w + gap)
+		var card_rect := Rect2(cx, card_y, card_w, card_h)
+		var hovered: bool = card_rect.has_point(mouse_pos)
+
+		# Card background
+		var bg_col := Color(0.12, 0.12, 0.18) if not hovered else Color(0.18, 0.18, 0.26)
+		draw_rect(card_rect, bg_col)
+		draw_rect(card_rect, data["color"] if hovered else data["color"].darkened(0.4), false, 2.0)
+
+		# Hero name
+		var name_str: String = data["name"]
+		var name_size := font.get_string_size(name_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 20)
+		draw_string(font, Vector2(cx + (card_w - name_size.x) / 2, card_y + 28), name_str,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 20, data["color"])
+
+		# Hero color swatch
+		draw_rect(Rect2(cx + 10, card_y + 38, card_w - 20, 3), data["color"])
+
+		# Hero description
+		var desc_str: String = data["desc"]
+		var desc_y: float = card_y + 58
+		# Word wrap manually
+		var words: PackedStringArray = desc_str.split(" ")
+		var line: String = ""
+		for w in words:
+			var test: String = line + ("" if line.is_empty() else " ") + w
+			var tw: float = font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			if tw > card_w - 16 and not line.is_empty():
+				draw_string(font, Vector2(cx + 8, desc_y), line,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.6, 0.7))
+				desc_y += 14
+				line = w
+			else:
+				line = test
+		if not line.is_empty():
+			draw_string(font, Vector2(cx + 8, desc_y), line,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.6, 0.7))
+			desc_y += 14
+
+		# Powers list
+		var py: float = desc_y + 10
+		draw_string(font, Vector2(cx + 8, py), "Powers:",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.8, 0.85))
+		py += 18
+		for p_idx in range(4):
+			var power: Dictionary = data["powers"][p_idx]
+			var hotkey_str := "[%d] " % (p_idx + 1)
+			var cost_str := " (%d)" % power["cost"]
+			draw_string(font, Vector2(cx + 8, py), hotkey_str + power["name"] + cost_str,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.85, 0.9))
+			py += 16
+			# Power description with word wrap
+			var pd_words: PackedStringArray = power["desc"].split(" ")
+			var pd_line: String = ""
+			for w in pd_words:
+				var test2: String = pd_line + ("" if pd_line.is_empty() else " ") + w
+				var tw2: float = font.get_string_size(test2, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+				if tw2 > card_w - 24 and not pd_line.is_empty():
+					draw_string(font, Vector2(cx + 16, py), pd_line,
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.6))
+					py += 12
+					pd_line = w
+				else:
+					pd_line = test2
+			if not pd_line.is_empty():
+				draw_string(font, Vector2(cx + 16, py), pd_line,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.6))
+				py += 16
+
+		# Click hint
+		if hovered:
+			var hint := "Click to select"
+			var hint_size := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+			draw_string(font, Vector2(cx + (card_w - hint_size.x) / 2, card_y + card_h - 10), hint,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 13, data["color"])
+
+	# Back hint
+	var back_str := "Press ESC to go back"
+	var back_size := font.get_string_size(back_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+	draw_string(font, Vector2(400 - back_size.x / 2, 560), back_str,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.5, 0.5, 0.55))
+
+func _input_hero_select(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		game_state = "level_select"
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var heroes: Array = ["commander", "warden", "saboteur", "architect"]
+		var card_w: float = 170.0
+		var card_h: float = 420.0
+		var gap: float = 12.0
+		var total_w: float = card_w * 4 + gap * 3
+		var start_x: float = (SCREEN_W - total_w) / 2.0
+		var card_y: float = 70.0
+		for i in range(4):
+			var cx: float = start_x + i * (card_w + gap)
+			var card_rect := Rect2(cx, card_y, card_w, card_h)
+			if card_rect.has_point(event.position):
+				sfx_click.play()
+				run_hero = heroes[i]
+				_start_roguelike_run()
+				return
+
 func _draw_visual_effects() -> void:
 	for fx in visual_effects:
 		if fx["type"] == "capture_pop":
@@ -1943,6 +2635,12 @@ func _draw_visual_effects() -> void:
 			var col: Color = fx["color"]
 			col.a = alpha * 0.9
 			draw_line(fx["start"], fx["end"], col, 2.0 * (1.0 - progress * 0.5))
+		elif fx["type"] == "power_flash":
+			var progress: float = fx["timer"] / fx["duration"]
+			var alpha: float = (1.0 - progress) * 0.3
+			var col: Color = fx["color"]
+			col.a = alpha
+			draw_rect(Rect2(0, 0, SCREEN_W, 4), col)
 
 func _draw_background() -> void:
 	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.08, 0.08, 0.12))
@@ -2039,6 +2737,32 @@ func _draw_buildings() -> void:
 		var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
 		draw_string(font, pos - Vector2(text_size.x / 2, -5),
 			text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+
+		# Hero effect indicators on buildings
+		if in_roguelike_run and run_hero != "":
+			var effect_icons: Array = []
+			if _has_hero_effect_on("fortify", b["id"]):
+				effect_icons.append({"label": "F", "color": Color(0.3, 0.8, 1.0)})
+				# Shield glow
+				var pulse: float = 0.5 + 0.3 * sin(game_time * 3.0)
+				draw_arc(pos, radius + 3, 0, TAU, 48, Color(0.3, 0.8, 1.0, pulse), 2.5)
+			if _has_hero_effect_on("entrench", b["id"]):
+				effect_icons.append({"label": "E", "color": Color(0.2, 0.7, 0.9)})
+			if _has_hero_effect_on("citadel", b["id"]):
+				effect_icons.append({"label": "C", "color": Color(0.2, 0.7, 0.9)})
+				var pulse2: float = 0.4 + 0.3 * sin(game_time * 2.0)
+				draw_arc(pos, radius + 5, 0, TAU, 48, Color(0.2, 0.7, 0.9, pulse2), 3.0)
+			if _has_hero_effect_on("sabotage", b["id"]):
+				effect_icons.append({"label": "S", "color": Color(0.6, 0.2, 0.8)})
+			if _has_hero_effect_on("overclock", b["id"]):
+				effect_icons.append({"label": "O", "color": Color(0.2, 0.8, 0.4)})
+				var pulse3: float = 0.3 + 0.3 * sin(game_time * 5.0)
+				draw_arc(pos, radius + 3, 0, TAU, 48, Color(0.2, 0.8, 0.4, pulse3), 2.0)
+			# Draw icons above building
+			for ei in range(effect_icons.size()):
+				var icon_pos: Vector2 = pos + Vector2(-6 + ei * 12, -radius - 14)
+				draw_string(font, icon_pos, effect_icons[ei]["label"],
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 10, effect_icons[ei]["color"])
 
 
 func _draw_building_shape(b: Dictionary, pos: Vector2, radius: float, fill_color: Color, outline_color: Color) -> void:
@@ -2305,6 +3029,10 @@ func _draw_hud() -> void:
 		# Upgrade icons (3 small icons to the left of the panel)
 		_draw_run_upgrade_icons(Vector2(rbar_x - 58, rbar_y + 4), 14.0)
 
+	# Hero power HUD
+	if in_roguelike_run and run_hero != "":
+		_draw_hero_power_hud(font)
+
 	# Instructions
 	var help_text: String = "Click: menu  |  Right-click: quick upgrade  |  Drag: send  |  Forges: +10% str  |  Towers: shoot enemies"
 	draw_string(font, Vector2(10, 590), help_text,
@@ -2324,6 +3052,116 @@ func _draw_hud() -> void:
 		else:
 			lost_text = "DEFEATED! All your buildings lost."
 		_draw_end_overlay(lost_text, Color(1.0, 0.3, 0.3))
+
+func _draw_hero_power_hud(font: Font) -> void:
+	var hero_data: Dictionary = HERO_DATA[run_hero]
+	var hero_color: Color = hero_data["color"]
+	var powers: Array = hero_data["powers"]
+
+	# Energy bar - top center
+	var ebar_w: float = 200.0
+	var ebar_h: float = 8.0
+	var ebar_x: float = (SCREEN_W - ebar_w) / 2.0
+	var ebar_y: float = 4.0
+	draw_rect(Rect2(ebar_x - 1, ebar_y - 1, ebar_w + 2, ebar_h + 2), Color(0.2, 0.2, 0.25))
+	draw_rect(Rect2(ebar_x, ebar_y, ebar_w, ebar_h), Color(0.08, 0.08, 0.12))
+	var fill_w: float = ebar_w * clampf(hero_energy / hero_max_energy, 0.0, 1.0)
+	var energy_col := hero_color.lerp(Color(1, 1, 0.5), 0.3)
+	draw_rect(Rect2(ebar_x, ebar_y, fill_w, ebar_h), energy_col)
+	# Energy text
+	var energy_str := "%d/%d" % [int(hero_energy), int(hero_max_energy)]
+	var estr_size := font.get_string_size(energy_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
+	draw_string(font, Vector2(SCREEN_W / 2 - estr_size.x / 2, ebar_y + ebar_h + 11), energy_str,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.85))
+
+	# 4 power buttons below energy bar
+	var btn_w: float = 80.0
+	var btn_h: float = 36.0
+	var btn_gap: float = 6.0
+	var total_btn_w: float = btn_w * 4 + btn_gap * 3
+	var btn_start_x: float = (SCREEN_W - total_btn_w) / 2.0
+	var btn_y: float = ebar_y + ebar_h + 16.0
+
+	for i in range(4):
+		var bx: float = btn_start_x + i * (btn_w + btn_gap)
+		var power: Dictionary = powers[i]
+		var affordable: bool = hero_energy >= power["cost"]
+		var on_cooldown: bool = hero_power_cooldowns[i] > 0.0
+		var is_targeting: bool = hero_targeting_power == i
+		var usable: bool = affordable and not on_cooldown
+
+		# Button background
+		var bg: Color
+		if is_targeting:
+			bg = hero_color.darkened(0.5)
+		elif usable:
+			bg = Color(0.14, 0.14, 0.2)
+		else:
+			bg = Color(0.08, 0.08, 0.1)
+		draw_rect(Rect2(bx, btn_y, btn_w, btn_h), bg)
+
+		# Border
+		var border_col: Color
+		if is_targeting:
+			border_col = hero_color
+		elif usable:
+			border_col = hero_color.darkened(0.3)
+		else:
+			border_col = Color(0.25, 0.25, 0.3)
+		draw_rect(Rect2(bx, btn_y, btn_w, btn_h), border_col, false, 1.0)
+
+		# Cooldown overlay
+		if on_cooldown:
+			var cd_frac: float = hero_power_cooldowns[i] / power["cooldown"]
+			draw_rect(Rect2(bx, btn_y, btn_w * cd_frac, btn_h), Color(0.1, 0.1, 0.15, 0.7))
+
+		# Hotkey number
+		var text_col: Color = Color(0.9, 0.9, 0.95) if usable else Color(0.4, 0.4, 0.45)
+		draw_string(font, Vector2(bx + 3, btn_y + 12), str(i + 1),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, hero_color if usable else Color(0.35, 0.35, 0.4))
+
+		# Power name (abbreviated to fit)
+		var pname: String = power["name"]
+		if pname.length() > 10:
+			pname = pname.left(9) + "."
+		draw_string(font, Vector2(bx + 14, btn_y + 12), pname,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, text_col)
+
+		# Cost
+		var cost_str := "%d" % power["cost"]
+		var cost_col: Color = Color(0.9, 0.85, 0.3) if affordable else Color(0.5, 0.3, 0.3)
+		draw_string(font, Vector2(bx + 3, btn_y + 26), cost_str,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, cost_col)
+
+		# Cooldown timer
+		if on_cooldown:
+			var cd_str := "%.1fs" % hero_power_cooldowns[i]
+			draw_string(font, Vector2(bx + 30, btn_y + 26), cd_str,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.4, 0.4))
+
+	# Targeting mode indicator
+	if hero_targeting_power >= 0:
+		var target_text: String = "Select target..."
+		var targeting: String = powers[hero_targeting_power]["targeting"]
+		if targeting == "friendly_node":
+			target_text = "Click a friendly node"
+		elif targeting == "enemy_node":
+			target_text = "Click an enemy node"
+		elif targeting == "any_node":
+			target_text = "Click any node"
+		elif targeting == "friendly_node_pair":
+			if hero_supply_first_node < 0:
+				target_text = "Click first friendly node"
+			else:
+				target_text = "Click second friendly node"
+		elif targeting == "path":
+			if hero_minefield_source < 0:
+				target_text = "Click first node (path start)"
+			else:
+				target_text = "Click second node (path end)"
+		var tt_size := font.get_string_size(target_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+		draw_string(font, Vector2(SCREEN_W / 2 - tt_size.x / 2, btn_y + btn_h + 14), target_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, hero_color)
 
 func _draw_end_overlay(text: String, color: Color) -> void:
 	var font := ThemeDB.fallback_font
