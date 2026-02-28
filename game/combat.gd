@@ -39,14 +39,19 @@ func resolve_arrival(unit_data: Dictionary) -> void:
 			var old_owner: String = target["owner"]
 			target["owner"] = unit_data["owner"]
 			if target["type"] != "forge" and target["type"] != "tower":
-				target["level"] = 1
+				if not main.has_relic("heritage"):
+					target["level"] = 1
 			target["gen_timer"] = 0.0
 			target["upgrading"] = false
 			target["upgrade_progress"] = 0.0
 			target["upgrade_duration"] = 0.0
+			# Relic: burst_capture +5 units on capture
+			if main.has_relic("burst_capture") and unit_data["owner"] == "player":
+				target["units"] += 5
 			main.sfx_capture.play()
 			if main.in_roguelike_run and unit_data["owner"] == "player" and old_owner != "player":
-				main.hero_energy = minf(main.hero_energy + 8.0, main.hero_max_energy)
+				var capture_energy: float = 15.0 if main.has_relic("surge_converter") else 8.0
+				main.hero_energy = minf(main.hero_energy + capture_energy, main.hero_max_energy)
 			main.visual_effects.append({
 				"type": "capture_pop",
 				"position": target["position"],
@@ -126,6 +131,14 @@ func check_minefields() -> void:
 				"duration": 0.6,
 				"color": Color(1.0, 0.3, 0.1),
 			})
+			# Concertina Wire: add slow zone after minefield triggers
+			if main.has_relic("concertina_wire"):
+				main.hero_active_effects.append({
+					"type": "minefield_slow",
+					"timer": 0.0,
+					"duration": 8.0,
+					"position": mid,
+				})
 
 func get_fractional(building: Dictionary) -> float:
 	if main.game_time - building["fractional_timestamp"] >= 10.0:
@@ -150,6 +163,8 @@ func get_defender_multiplier(building: Dictionary) -> float:
 	var base: float = (90.0 + building["level"] * 10.0 + forge_count * 10.0 + defense_bonus) / 100.0
 	if building["owner"] == "player" and main._has_hero_effect_on("entrench", building["id"]):
 		base *= 1.5
+	if building["owner"] == "player" and main.has_relic("iron_bastion"):
+		base *= 1.3
 	return base
 
 func get_attacker_multiplier(owner: String) -> float:
@@ -160,6 +175,8 @@ func get_attacker_multiplier(owner: String) -> float:
 	var base: float = (100.0 + forge_count * 10.0 + attack_bonus) / 100.0
 	if owner == "player" and main._has_hero_effect("blitz"):
 		base *= 2.0
+	if owner == "player" and main.has_relic("war_machine"):
+		base *= 1.3
 	return base
 
 func check_win_condition() -> void:

@@ -616,24 +616,26 @@ func draw_roguelike_map() -> void:
 
 	if main.run_overlay == "merchant":
 		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
-		var panel := Rect2(155, 128, 490, 295)
+		var panel := Rect2(155, 100, 490, 450)
 		main.draw_rect(panel, Color(0.09, 0.08, 0.02))
 		main.draw_rect(panel, Color(0.7, 0.6, 0.15), false, 2.0)
 		var m_title := "MERCHANT"
 		var mt_sz := font.get_string_size(m_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 26)
-		main.draw_string(font, Vector2(400 - mt_sz.x / 2, 163), m_title,
+		main.draw_string(font, Vector2(400 - mt_sz.x / 2, 133), m_title,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.85, 0.2))
 		var gd_str := "Gold: %d" % main.run_gold
 		var gd_sz := font.get_string_size(gd_str, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
-		main.draw_string(font, Vector2(400 - gd_sz.x / 2, 187), gd_str,
+		main.draw_string(font, Vector2(400 - gd_sz.x / 2, 157), gd_str,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
-		main.draw_line(Vector2(165, 200), Vector2(635, 200), Color(0.5, 0.42, 0.1, 0.45), 1.0)
+		main.draw_line(Vector2(165, 170), Vector2(635, 170), Color(0.5, 0.42, 0.1, 0.45), 1.0)
+		main.draw_string(font, Vector2(175, 188), "UPGRADES",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.6, 0.3))
 		var item_keys   := ["speed",               "attack",              "defense"             ]
 		var item_names  := ["Speed Boost",          "Attack Bonus",        "Defense Bonus"       ]
 		var item_descs  := ["+10% movement speed",  "+10% attack power",   "+10% defense"        ]
 		var item_colors := [Color(0.35, 0.75, 1.0), Color(1.0, 0.5, 0.25), Color(0.35, 0.9, 0.45)]
-		var item_ys     := [215,                    270,                   325                   ]
-		var buy_rects   := [Rect2(370, 214, 160, 32), Rect2(370, 269, 160, 32), Rect2(370, 324, 160, 32)]
+		var item_ys     := [200,                    255,                   310                   ]
+		var buy_rects   := [Rect2(370, 199, 160, 32), Rect2(370, 254, 160, 32), Rect2(370, 309, 160, 32)]
 		var can_buy: bool = main.run_gold >= 80
 		for i in range(3):
 			var lvl: int = main.run_upgrades.get(item_keys[i], 0)
@@ -655,8 +657,36 @@ func draw_roguelike_map() -> void:
 			var bl_sz := font.get_string_size(bl, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
 			main.draw_string(font, Vector2(br.position.x + (br.size.x - bl_sz.x) / 2, br.position.y + 22),
 				bl, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col if can_buy else Color(0.35, 0.35, 0.35))
-		main.draw_line(Vector2(165, 358), Vector2(635, 358), Color(0.5, 0.42, 0.1, 0.45), 1.0)
-		var leave_rect := Rect2(305, 376, 190, 34)
+		main.draw_line(Vector2(165, 350), Vector2(635, 350), Color(0.5, 0.42, 0.1, 0.45), 1.0)
+		# Relics section
+		main.draw_string(font, Vector2(175, 368), "RELICS",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.6, 0.3))
+		for i in range(main.merchant_relics.size()):
+			var relic_id: String = main.merchant_relics[i]
+			var relic_data: Dictionary = GameRelics.RELICS[relic_id]
+			var ry: int = 380 + i * 55
+			var rcol: Color = relic_data["color"]
+			var is_bought: bool = relic_id in main.merchant_relics_bought or relic_id in main.run_relics
+			# Diamond icon
+			_draw_relic_diamond(Vector2(184, ry + 9), 7.0, rcol if not is_bought else Color(0.3, 0.3, 0.35))
+			main.draw_string(font, Vector2(200, ry + 13), relic_data["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, rcol if not is_bought else Color(0.4, 0.4, 0.45))
+			main.draw_string(font, Vector2(200, ry + 27), relic_data["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.65, 0.65, 0.72) if not is_bought else Color(0.35, 0.35, 0.4))
+			var relic_buy_rect := Rect2(370, 389 + i * 55, 160, 32)
+			if is_bought:
+				var sold_sz := font.get_string_size("SOLD", HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+				main.draw_string(font, Vector2(relic_buy_rect.position.x + (relic_buy_rect.size.x - sold_sz.x) / 2, relic_buy_rect.position.y + 22),
+					"SOLD", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.4, 0.4, 0.45))
+			else:
+				var relic_can_buy: bool = main.run_gold >= relic_data["cost"]
+				main.draw_rect(relic_buy_rect, Color(0.16, 0.13, 0.04) if relic_can_buy else Color(0.1, 0.1, 0.1))
+				main.draw_rect(relic_buy_rect, rcol if relic_can_buy else Color(0.28, 0.28, 0.28), false, 1.5)
+				var rbl := "Buy  %dg" % relic_data["cost"]
+				var rbl_sz := font.get_string_size(rbl, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+				main.draw_string(font, Vector2(relic_buy_rect.position.x + (relic_buy_rect.size.x - rbl_sz.x) / 2, relic_buy_rect.position.y + 22),
+					rbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, rcol if relic_can_buy else Color(0.35, 0.35, 0.35))
+		var leave_rect := Rect2(305, 506, 190, 34)
 		main.draw_rect(leave_rect, Color(0.1, 0.1, 0.16))
 		main.draw_rect(leave_rect, Color(0.3, 0.3, 0.45), false, 1.5)
 		var ll := "Leave Shop"
@@ -683,8 +713,111 @@ func draw_roguelike_map() -> void:
 		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
 		main.draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.8, 0.75, 0.5))
+	elif main.run_overlay == "elite_reward":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var ep := Rect2(200, 200, 400, 160)
+		main.draw_rect(ep, Color(0.08, 0.06, 0.12))
+		main.draw_rect(ep, Color(0.8, 0.5, 0.2), false, 2.0)
+		var et := "ELITE REWARD"
+		var et_sz := font.get_string_size(et, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
+		main.draw_string(font, Vector2(400 - et_sz.x / 2, 232), et,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.7, 0.2))
+		if main.reward_relics.size() > 0:
+			var rid: String = main.reward_relics[0]
+			var rd: Dictionary = GameRelics.RELICS[rid]
+			_draw_relic_diamond(Vector2(260, 275), 10.0, rd["color"])
+			main.draw_string(font, Vector2(280, 272), rd["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, rd["color"])
+			main.draw_string(font, Vector2(280, 290), rd["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.7, 0.75))
+			var claim := "Click to claim"
+			var cl_sz := font.get_string_size(claim, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(400 - cl_sz.x / 2, 340), claim,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.7))
+	elif main.run_overlay == "boss_reward":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var bp := Rect2(80, 170, 640, 240)
+		main.draw_rect(bp, Color(0.08, 0.06, 0.12))
+		main.draw_rect(bp, Color(0.9, 0.6, 0.1), false, 2.0)
+		var bt := "BOSS REWARD — Choose One"
+		var bt_sz := font.get_string_size(bt, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
+		main.draw_string(font, Vector2(400 - bt_sz.x / 2, 202), bt,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.2))
+		for i in range(main.reward_relics.size()):
+			var rid: String = main.reward_relics[i]
+			var rd: Dictionary = GameRelics.RELICS[rid]
+			var cx: float = 115.0 + i * 200.0
+			var card := Rect2(cx, 220, 170, 160)
+			var hovered: bool = card.has_point(main.mouse_pos)
+			main.draw_rect(card, Color(0.12, 0.1, 0.16) if not hovered else Color(0.18, 0.15, 0.22))
+			main.draw_rect(card, rd["color"] if hovered else Color(0.35, 0.35, 0.4), false, 1.5 if not hovered else 2.5)
+			_draw_relic_diamond(Vector2(cx + 85, 255), 12.0, rd["color"])
+			var rn_sz := font.get_string_size(rd["name"], HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(cx + 85 - rn_sz.x / 2, 290), rd["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, rd["color"])
+			# Word wrap description
+			main.draw_string(font, Vector2(cx + 10, 310), rd["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, 150, 11, Color(0.7, 0.7, 0.75))
+
+	# Draw collected relic icons on the map
+	if main.run_overlay == "" and main.run_relics.size() > 0:
+		draw_relic_icons_map(font)
 
 # === HUD Drawing ===
+
+func _draw_relic_diamond(center: Vector2, size: float, col: Color) -> void:
+	var pts := PackedVector2Array([
+		center + Vector2(0, -size),
+		center + Vector2(size * 0.7, 0),
+		center + Vector2(0, size),
+		center + Vector2(-size * 0.7, 0),
+	])
+	main.draw_colored_polygon(pts, col.darkened(0.4))
+	main.draw_polyline(pts + PackedVector2Array([pts[0]]), col, 1.5)
+
+func draw_relic_icons_map(font: Font) -> void:
+	var origin := Vector2(20, 550)
+	var spacing: float = 16.0
+	for i in range(main.run_relics.size()):
+		var rid: String = main.run_relics[i]
+		var rd: Dictionary = GameRelics.RELICS[rid]
+		var ix: float = origin.x + i * spacing
+		var iy: float = origin.y
+		_draw_relic_diamond(Vector2(ix, iy), 5.0, rd["color"])
+		if Rect2(ix - 6, iy - 6, 12, 12).has_point(main.mouse_pos):
+			var tip_w: float = 160.0
+			var tip_h: float = 36.0
+			var tip_x: float = clampf(ix - 8, 5, GameData.SCREEN_W - tip_w - 5)
+			var tip_y: float = iy - tip_h - 4.0
+			main.draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), Color(0.08, 0.08, 0.12, 0.97))
+			main.draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), rd["color"], false, 1.0)
+			main.draw_string(font, Vector2(tip_x + 6, tip_y + 14), rd["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, rd["color"])
+			main.draw_string(font, Vector2(tip_x + 6, tip_y + 28), rd["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, 148, 10, Color(0.75, 0.75, 0.8))
+
+func draw_relic_icons_battle(origin: Vector2) -> void:
+	if not main.in_roguelike_run or main.run_relics.size() == 0:
+		return
+	var font := ThemeDB.fallback_font
+	var spacing: float = 14.0
+	for i in range(main.run_relics.size()):
+		var rid: String = main.run_relics[i]
+		var rd: Dictionary = GameRelics.RELICS[rid]
+		var ix: float = origin.x + i * spacing
+		var iy: float = origin.y
+		_draw_relic_diamond(Vector2(ix, iy), 4.0, rd["color"])
+		if Rect2(ix - 5, iy - 5, 10, 10).has_point(main.mouse_pos):
+			var tip_w: float = 150.0
+			var tip_h: float = 34.0
+			var tip_x: float = clampf(ix - 8, 5, GameData.SCREEN_W - tip_w - 5)
+			var tip_y: float = iy + 8
+			main.draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), Color(0.08, 0.08, 0.12, 0.97))
+			main.draw_rect(Rect2(tip_x, tip_y, tip_w, tip_h), rd["color"], false, 1.0)
+			main.draw_string(font, Vector2(tip_x + 5, tip_y + 13), rd["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, rd["color"])
+			main.draw_string(font, Vector2(tip_x + 5, tip_y + 26), rd["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, 140, 9, Color(0.75, 0.75, 0.8))
 
 func draw_upgrade_icon_symbol(key: String, center: Vector2, size: float, col: Color) -> void:
 	match key:
@@ -802,6 +935,7 @@ func draw_hud() -> void:
 		main.draw_string(font, Vector2(rbar_x + 4, rbar_y + 33), rgold_text,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.85, 0.2))
 		draw_run_upgrade_icons(Vector2(rbar_x - 58, rbar_y + 4), 14.0)
+		draw_relic_icons_battle(Vector2(rbar_x - 58, rbar_y + 22))
 
 	if main.in_roguelike_run and main.run_hero != "":
 		draw_hero_power_hud(font)

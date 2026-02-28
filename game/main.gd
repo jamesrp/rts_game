@@ -52,7 +52,13 @@ var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
-var run_overlay: String = ""  # "", "run_over", "run_won", "merchant"
+var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward"
+var run_relics: Array = []
+var merchant_relics: Array = []
+var merchant_relics_bought: Array = []
+var reward_relics: Array = []
+var first_power_used: bool = false
+var drain_field_timer: float = 0.0
 
 # === Hero System ===
 var run_hero: String = ""  # "commander", "warden", "saboteur", "architect"
@@ -158,6 +164,12 @@ func _start_roguelike_run() -> void:
 	run_current_row = 0
 	run_last_node = -1
 	run_overlay = ""
+	run_relics = []
+	merchant_relics = []
+	merchant_relics_bought = []
+	reward_relics = []
+	first_power_used = false
+	drain_field_timer = 0.0
 	_reset_hero_battle_state()
 	run_map = _generate_run_map(run_act)
 	game_state = "roguelike_map"
@@ -298,18 +310,26 @@ func _return_from_roguelike_battle() -> void:
 			"boss": run_gold += randi_range(40, 60)
 			"elite": run_gold += randi_range(25, 35)
 			_: run_gold += randi_range(10, 20)
+		# Gold Hoard: +5g per fight
+		if has_relic("gold_hoard"):
+			run_gold += 5
 		var is_boss: bool = node_type_r == "boss"
+		var is_elite: bool = node_type_r == "elite"
 		if is_boss:
-			if run_act >= 3:
-				run_overlay = "run_won"
-				game_state = "roguelike_map"
+			reward_relics = GameRelics.get_boss_relics(run_relics)
+			if reward_relics.size() > 0:
+				run_overlay = "boss_reward"
 			else:
-				run_act += 1
-				run_time_left = 600.0
-				run_map = _generate_run_map(run_act)
-				run_current_row = 0
-				run_last_node = -1
-				game_state = "roguelike_map"
+				_advance_after_boss()
+			game_state = "roguelike_map"
+		elif is_elite:
+			var elite_relic: String = GameRelics.get_elite_relic(run_hero, run_relics)
+			if elite_relic != "":
+				reward_relics = [elite_relic]
+				run_overlay = "elite_reward"
+			else:
+				run_current_row += 1
+			game_state = "roguelike_map"
 		else:
 			run_current_row += 1
 			game_state = "roguelike_map"
@@ -317,6 +337,27 @@ func _return_from_roguelike_battle() -> void:
 		# Lost the battle — run is over
 		run_overlay = "run_over"
 		game_state = "roguelike_map"
+
+func _advance_after_boss() -> void:
+	if run_act >= 3:
+		run_overlay = "run_won"
+	else:
+		run_act += 1
+		run_time_left = 600.0
+		run_map = _generate_run_map(run_act)
+		run_current_row = 0
+		run_last_node = -1
+
+func _claim_relic(relic_id: String) -> void:
+	if relic_id == "" or relic_id in run_relics:
+		return
+	run_relics.append(relic_id)
+	# Immediate effects
+	if relic_id == "temporal_flux":
+		run_time_left += 90.0
+	elif relic_id == "gold_hoard":
+		run_gold += 50
+	sfx_merchant[randi() % sfx_merchant.size()].play()
 
 func _abandon_roguelike_run() -> void:
 	game_state = "level_select"
@@ -339,12 +380,48 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				run_upgrades[item_keys[i]] += 1
 				sfx_merchant[randi() % sfx_merchant.size()].play()
 				return
-		var leave_rect := Rect2(305, 376, 190, 34)
+		# Relic buy buttons
+		for i in range(merchant_relics.size()):
+			var relic_buy_rect := Rect2(370, 389 + i * 55, 160, 32)
+			if relic_buy_rect.has_point(event.position):
+				var relic_id: String = merchant_relics[i]
+				if relic_id not in merchant_relics_bought and relic_id not in run_relics:
+					var relic_data: Dictionary = GameRelics.RELICS[relic_id]
+					if run_gold >= relic_data["cost"]:
+						run_gold -= relic_data["cost"]
+						_claim_relic(relic_id)
+						merchant_relics_bought.append(relic_id)
+						return
+		var leave_rect := Rect2(305, 506, 190, 34)
 		if leave_rect.has_point(event.position):
 			run_map[run_current_row][run_last_node]["completed"] = true
 			run_current_row += 1
 			run_overlay = ""
 			sfx_click.play()
+		return
+
+	# Elite reward overlay: click to claim
+	if run_overlay == "elite_reward":
+		if reward_relics.size() > 0:
+			var claim_rect := Rect2(250, 260, 300, 80)
+			if claim_rect.has_point(event.position):
+				_claim_relic(reward_relics[0])
+				reward_relics.clear()
+				run_overlay = ""
+				run_current_row += 1
+		return
+
+	# Boss reward overlay: click one of 3
+	if run_overlay == "boss_reward":
+		for i in range(reward_relics.size()):
+			var card_x: float = 115.0 + i * 200.0
+			var card_rect := Rect2(card_x, 220, 170, 160)
+			if card_rect.has_point(event.position):
+				_claim_relic(reward_relics[i])
+				reward_relics.clear()
+				run_overlay = ""
+				_advance_after_boss()
+				return
 		return
 
 	# If overlay is showing, click dismisses it
@@ -363,6 +440,8 @@ func _input_roguelike_map(event: InputEvent) -> void:
 			sfx_click.play()
 			if node["type"] == "merchant":
 				run_last_node = col_idx
+				merchant_relics = GameRelics.get_shop_relics(run_hero, run_relics)
+				merchant_relics_bought = []
 				run_overlay = "merchant"
 			else:
 				_start_roguelike_battle(col_idx)
@@ -573,7 +652,14 @@ func _update_visual_effects(delta: float) -> void:
 
 func _update_hero_system(delta: float) -> void:
 	# Passive energy regen
-	hero_energy = minf(hero_energy + hero_energy_rate * delta, hero_max_energy)
+	var energy_rate: float = hero_energy_rate
+	if has_relic("capacitor"):
+		energy_rate *= 1.25
+	if has_relic("dynamo"):
+		energy_rate *= 1.2
+	if has_relic("overdrive"):
+		energy_rate *= 1.5
+	hero_energy = minf(hero_energy + energy_rate * delta, hero_max_energy)
 	# Tick cooldowns
 	for i in range(4):
 		if hero_power_cooldowns[i] > 0.0:
@@ -602,6 +688,7 @@ func _reset_hero_battle_state() -> void:
 	hero_targeting_power = -1
 	hero_supply_first_node = -1
 	hero_minefield_source = -1
+	first_power_used = false
 
 func _apply_supply_line_equalize(fx: Dictionary) -> void:
 	var id_a: int = fx["node_a"]
@@ -624,7 +711,12 @@ func _try_activate_hero_power(index: int) -> void:
 	if index < 0 or index >= powers.size():
 		return
 	var power: Dictionary = powers[index]
-	if hero_energy < power["cost"] or hero_power_cooldowns[index] > 0.0:
+	var effective_cost: float = power["cost"]
+	if has_relic("free_opener") and not first_power_used:
+		effective_cost = 0.0
+	elif has_relic("efficiency_core"):
+		effective_cost *= 0.8
+	if hero_energy < effective_cost or hero_power_cooldowns[index] > 0.0:
 		return
 	var targeting: String = power["targeting"]
 	if targeting == "instant":
@@ -677,7 +769,15 @@ func _handle_hero_target_click(pos: Vector2) -> void:
 func _activate_hero_power(index: int, target_id: int) -> void:
 	var powers: Array = GameData.HERO_DATA[run_hero]["powers"]
 	var power: Dictionary = powers[index]
-	hero_energy -= power["cost"]
+	var actual_cost: float = power["cost"]
+	if has_relic("free_opener") and not first_power_used:
+		actual_cost = 0.0
+		first_power_used = true
+	elif has_relic("efficiency_core"):
+		actual_cost *= 0.8
+	hero_energy -= actual_cost
+	if has_relic("feedback_loop") and actual_cost > 0:
+		hero_energy = minf(hero_energy + actual_cost * 0.1, hero_max_energy)
 	hero_power_cooldowns[index] = power["cooldown"]
 	sfx_click.play()
 
@@ -717,7 +817,15 @@ func _activate_hero_power(index: int, target_id: int) -> void:
 func _activate_hero_power_pair(index: int, node_a: int, node_b: int) -> void:
 	var powers: Array = GameData.HERO_DATA[run_hero]["powers"]
 	var power: Dictionary = powers[index]
-	hero_energy -= power["cost"]
+	var actual_cost: float = power["cost"]
+	if has_relic("free_opener") and not first_power_used:
+		actual_cost = 0.0
+		first_power_used = true
+	elif has_relic("efficiency_core"):
+		actual_cost *= 0.8
+	hero_energy -= actual_cost
+	if has_relic("feedback_loop") and actual_cost > 0:
+		hero_energy = minf(hero_energy + actual_cost * 0.1, hero_max_energy)
 	hero_power_cooldowns[index] = power["cooldown"]
 	sfx_click.play()
 
@@ -741,7 +849,8 @@ func _activate_hero_power_pair(index: int, node_a: int, node_b: int) -> void:
 func _power_rally_cry(target_id: int) -> void:
 	for b in buildings:
 		if b["owner"] == "player" and b["id"] != target_id and b["type"] != "forge" and b["type"] != "tower":
-			var send_count: int = int(b["units"] * 0.3)
+			var rally_pct: float = 0.5 if has_relic("warchief_banner") else 0.3
+			var send_count: int = int(b["units"] * rally_pct)
 			if send_count > 0:
 				dispatch_queues.append({
 					"source_id": b["id"],
@@ -767,20 +876,24 @@ func _power_conscription() -> void:
 			b["units"] += bonus
 
 func _power_blitz() -> void:
+	var dur: float = 18.0 if has_relic("shock_doctrine") else 12.0
 	hero_active_effects.append({
 		"type": "blitz",
 		"timer": 0.0,
-		"duration": 12.0,
+		"duration": dur,
 	})
 
 # Warden powers
 func _power_fortify(target_id: int) -> void:
+	var dur: float = 14.0 if has_relic("reinforced_walls") else 8.0
 	hero_active_effects.append({
 		"type": "fortify",
 		"timer": 0.0,
-		"duration": 8.0,
+		"duration": dur,
 		"target_id": target_id,
 	})
+	if has_relic("reinforced_walls") and target_id >= 0 and target_id < buildings.size():
+		buildings[target_id]["units"] += 5
 
 func _power_entrench(target_id: int) -> void:
 	hero_active_effects.append({
@@ -813,12 +926,15 @@ func _power_citadel(target_id: int) -> void:
 
 # Saboteur powers
 func _power_sabotage(target_id: int) -> void:
+	var dur: float = 20.0 if has_relic("deep_cover") else 12.0
 	hero_active_effects.append({
 		"type": "sabotage",
 		"timer": 0.0,
-		"duration": 12.0,
+		"duration": dur,
 		"target_id": target_id,
 	})
+	if has_relic("deep_cover") and target_id >= 0 and target_id < buildings.size():
+		buildings[target_id]["units"] = buildings[target_id]["units"] / 2
 
 func _power_blackout() -> void:
 	hero_active_effects.append({
@@ -829,7 +945,8 @@ func _power_blackout() -> void:
 
 func _power_turncoat(target_id: int) -> void:
 	var target: Dictionary = buildings[target_id]
-	var convert_count: int = int(target["units"] * 0.3)
+	var convert_pct: float = 0.5 if has_relic("double_agent") else 0.3
+	var convert_count: int = int(target["units"] * convert_pct)
 	if convert_count > 0:
 		target["units"] -= convert_count
 		# Send converted units to nearest player building
@@ -870,10 +987,11 @@ func _power_overclock(target_id: int) -> void:
 	})
 
 func _power_supply_line(node_a: int, node_b: int) -> void:
+	var dur: float = 25.0 if has_relic("grid_link") else 15.0
 	hero_active_effects.append({
 		"type": "supply_line",
 		"timer": 0.0,
-		"duration": 15.0,
+		"duration": dur,
 		"node_a": node_a,
 		"node_b": node_b,
 		"equalize_timer": 0.0,
@@ -882,7 +1000,8 @@ func _power_supply_line(node_a: int, node_b: int) -> void:
 func _power_terraform(target_id: int) -> void:
 	var b: Dictionary = buildings[target_id]
 	if b["type"] != "forge" and b["type"] != "tower":
-		b["level"] = mini(b["level"] + 2, GameData.MAX_BUILDING_LEVEL)
+		var tf_amount: int = 3 if has_relic("rapid_expansion") else 2
+		b["level"] = mini(b["level"] + tf_amount, GameData.MAX_BUILDING_LEVEL)
 		b["max_capacity"] = GameData.BASE_CAPACITY * b["level"]
 		sfx_upgrade.play()
 
@@ -892,6 +1011,9 @@ func _power_nexus() -> void:
 		"timer": 0.0,
 		"duration": 15.0,
 	})
+
+func has_relic(id: String) -> bool:
+	return id in run_relics
 
 func _has_hero_effect(effect_type: String) -> bool:
 	for fx in hero_active_effects:
@@ -932,9 +1054,21 @@ func _update_unit_generation(delta: float) -> void:
 		# Citadel: 3x gen rate and 2x cap
 		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
 			gen_mult *= 3.0
+		# Relic: gen_boost +15% gen for player
+		if b["owner"] == "player" and has_relic("gen_boost"):
+			gen_mult *= 1.15
+		# Relic: titan_form +15% gen for player
+		if b["owner"] == "player" and has_relic("titan_form"):
+			gen_mult *= 1.15
 		var max_cap: int = GameData.BASE_CAPACITY * level
 		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
 			max_cap *= 2
+		# Relic: deep_reserves +25% capacity for player
+		if b["owner"] == "player" and has_relic("deep_reserves"):
+			max_cap = int(max_cap * 1.25)
+		# Relic: titan_form +40% capacity for player
+		if b["owner"] == "player" and has_relic("titan_form"):
+			max_cap = int(max_cap * 1.4)
 		b["max_capacity"] = max_cap
 		if b["units"] >= max_cap:
 			continue
@@ -1012,9 +1146,20 @@ func _update_moving_units(delta: float) -> void:
 		var speed: float = GameData.UNIT_SPEED
 		if in_roguelike_run and u["owner"] == "player":
 			speed *= 1.0 + 0.1 * run_upgrades.get("speed", 0)
+		# Relic: swift_legs +20% speed for player
+		if has_relic("swift_legs") and u["owner"] == "player":
+			speed *= 1.2
 		# Forced March: player units move 2x
 		if forced_march and u["owner"] == "player":
 			speed *= 2.0
+		# Concertina wire: slow enemies near triggered minefields
+		if u["owner"] == "opponent":
+			for fx in hero_active_effects:
+				if fx["type"] == "minefield_slow" and fx["timer"] < fx["duration"]:
+					var unit_pos: Vector2 = u["start_pos"].lerp(u["end_pos"], u["progress"])
+					if unit_pos.distance_to(fx["position"]) <= 60.0:
+						speed *= 0.4
+						break
 		# Blackout: enemy transit slowed 50%
 		if blackout and u["owner"] == "opponent":
 			speed *= 0.5
