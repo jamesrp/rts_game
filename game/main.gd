@@ -552,7 +552,7 @@ func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary
 		if i in player_indices:
 			units.append(20)
 		elif i in opponent_indices:
-			units.append(10 + ai_level * 2)
+			units.append(10 + int(ai_level * 1.5))
 		else:
 			units.append(randi_range(5, 15))
 
