@@ -52,7 +52,9 @@ var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
-var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire"
+var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire", "event"
+var current_event: Dictionary = {}  # Current event data from GameEvents
+var event_result_text: String = ""  # Shown after choosing
 var campfire_upgrade_choices: Array = []  # Array of upgrade dicts offered at campfire
 var run_hero_upgrades: Array = []  # Upgrade IDs (names) acquired during run
 var run_relics: Array = []
@@ -172,6 +174,8 @@ func _start_roguelike_run() -> void:
 	merchant_relics = []
 	merchant_relics_bought = []
 	reward_relics = []
+	current_event = {}
+	event_result_text = ""
 	first_power_used = false
 	drain_field_timer = 0.0
 	_reset_hero_battle_state()
@@ -237,6 +241,18 @@ func _generate_run_map(act: int) -> Array:
 	if campfire_candidates.size() > 0:
 		var cc: Array = campfire_candidates[0]
 		map[cc[0]][cc[1]]["type"] = "campfire"
+
+	# Assign 1 event node in middle rows (rows 1-3, not row 0 or boss row)
+	var event_candidates: Array = []
+	for row_idx in [1, 2, 3]:
+		if row_idx < map.size() - 1:
+			for col_idx in range(map[row_idx].size()):
+				if map[row_idx][col_idx]["type"] == "battle":
+					event_candidates.append([row_idx, col_idx])
+	event_candidates.shuffle()
+	if event_candidates.size() > 0:
+		var ec: Array = event_candidates[0]
+		map[ec[0]][ec[1]]["type"] = "event"
 
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
@@ -421,6 +437,30 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				return
 		return
 
+	# Event overlay: handle choice clicks or dismiss result
+	if run_overlay == "event":
+		if event_result_text != "":
+			# Result is showing — click anywhere to dismiss
+			var dismiss_rect := Rect2(280, 370, 240, 40)
+			if dismiss_rect.has_point(event.position):
+				run_map[run_current_row][run_last_node]["completed"] = true
+				run_current_row += 1
+				run_overlay = ""
+				current_event = {}
+				event_result_text = ""
+				sfx_click.play()
+			return
+		# Show choices
+		if current_event.has("choices"):
+			for i in range(current_event["choices"].size()):
+				var choice_rect := Rect2(180, 240 + i * 60, 440, 50)
+				if choice_rect.has_point(event.position):
+					var choice: Dictionary = current_event["choices"][i]
+					event_result_text = _apply_event_choice(choice["callback_id"])
+					sfx_merchant[randi() % sfx_merchant.size()].play()
+					return
+		return
+
 	# Merchant overlay: handle shop button clicks
 	if run_overlay == "merchant":
 		var item_keys := ["speed", "attack", "defense"]
@@ -498,6 +538,11 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				run_last_node = col_idx
 				campfire_upgrade_choices = _get_campfire_upgrades()
 				run_overlay = "campfire"
+			elif node["type"] == "event":
+				run_last_node = col_idx
+				current_event = GameEvents.get_random_event()
+				event_result_text = ""
+				run_overlay = "event"
 			else:
 				_start_roguelike_battle(col_idx)
 			return
@@ -1231,6 +1276,72 @@ func _get_campfire_upgrades() -> Array:
 	available.shuffle()
 	var count: int = mini(3, available.size())
 	return available.slice(0, count)
+
+func _apply_event_choice(callback_id: String) -> String:
+	match callback_id:
+		"nothing":
+			return "You move on."
+		"shrine_gamble":
+			if randf() < 0.5:
+				var relic_id: String = GameRelics.get_elite_relic(run_hero, run_relics)
+				if relic_id != "":
+					_claim_relic(relic_id)
+					var relic_name: String = GameRelics.RELICS[relic_id]["name"]
+					return "The shrine glows! You found: " + relic_name
+				else:
+					run_gold += 80
+					return "The shrine glows! You found 80 gold."
+			else:
+				run_time_left = maxf(0.0, run_time_left - 90.0)
+				return "The shrine crumbles! You lost 1:30."
+		"sell_time_60":
+			run_time_left = maxf(0.0, run_time_left - 60.0)
+			run_gold += 60
+			return "You traded 1:00 for 60 gold."
+		"sell_time_120":
+			run_time_left = maxf(0.0, run_time_left - 120.0)
+			run_gold += 130
+			return "You traded 2:00 for 130 gold."
+		"cache_gold":
+			run_gold += 40
+			return "You pocket the gold. +40 gold."
+		"cache_time":
+			run_time_left = minf(run_time_left + 60.0, 600.0)
+			return "Supplies restored 1:00 of time."
+		"collector_buy":
+			if run_gold < 100:
+				return "You don't have enough gold!"
+			run_gold -= 100
+			var relic_id: String = GameRelics.get_elite_relic(run_hero, run_relics)
+			if relic_id != "":
+				_claim_relic(relic_id)
+				var relic_name: String = GameRelics.RELICS[relic_id]["name"]
+				return "You acquired: " + relic_name
+			else:
+				run_gold += 50
+				return "Nothing good left... refunded 50 gold."
+		"train_speed":
+			run_upgrades["speed"] += 1
+			return "Speed upgrade +1!"
+		"train_attack":
+			run_upgrades["attack"] += 1
+			return "Attack upgrade +1!"
+		"train_defense":
+			run_upgrades["defense"] += 1
+			return "Defense upgrade +1!"
+		"blood_altar":
+			run_time_left = maxf(0.0, run_time_left - 90.0)
+			run_gold += 30
+			var relic_id: String = GameRelics.get_elite_relic(run_hero, run_relics)
+			if relic_id != "":
+				_claim_relic(relic_id)
+				var relic_name: String = GameRelics.RELICS[relic_id]["name"]
+				return "The altar accepts! " + relic_name + " + 30 gold."
+			else:
+				run_gold += 50
+				return "The altar accepts! +80 gold total."
+		_:
+			return "Nothing happens."
 
 func _has_hero_effect(effect_type: String) -> bool:
 	for fx in hero_active_effects:

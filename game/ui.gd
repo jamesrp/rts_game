@@ -607,6 +607,19 @@ func draw_roguelike_map() -> void:
 				if available:
 					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
 					main.draw_arc(pos, 19.0, 0, TAU, 32, Color(1.0, 0.85, 0.2, pulse), 2.0)
+			elif node["type"] == "event":
+				var ev_col := Color(0.5, 0.8, 1.0) if available else Color(0.25, 0.4, 0.5)
+				main.draw_circle(pos, 15.0, Color(0.05, 0.1, 0.15))
+				main.draw_arc(pos, 15.0, 0, TAU, 32, ev_col, 2.5)
+				# Draw "?" symbol
+				var q_size: int = 16
+				var q_str := "?"
+				var q_sz := font.get_string_size(q_str, HORIZONTAL_ALIGNMENT_CENTER, -1, q_size)
+				main.draw_string(font, pos + Vector2(-q_sz.x / 2, q_size / 2.8), q_str,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, q_size, ev_col)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
+					main.draw_arc(pos, 19.0, 0, TAU, 32, Color(0.5, 0.8, 1.0, pulse), 2.0)
 			elif available:
 				var pulse: float = 0.6 + 0.3 * sin(main.game_time * 3.0)
 				main.draw_circle(pos, 14.0, Color(0.15, 0.2, 0.35))
@@ -789,6 +802,55 @@ func draw_roguelike_map() -> void:
 			# Description with word wrap
 			main.draw_string(font, Vector2(cx + 10, 290), upgrade["desc"],
 				HORIZONTAL_ALIGNMENT_LEFT, 150, 11, Color(0.7, 0.7, 0.75))
+	elif main.run_overlay == "event":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var panel := Rect2(130, 100, 540, 400)
+		main.draw_rect(panel, Color(0.06, 0.09, 0.14))
+		main.draw_rect(panel, Color(0.4, 0.7, 0.9), false, 2.0)
+		if main.current_event.has("title"):
+			var ev_title: String = main.current_event["title"]
+			var et_sz := font.get_string_size(ev_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 24)
+			main.draw_string(font, Vector2(400 - et_sz.x / 2, 138), ev_title,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.5, 0.85, 1.0))
+			# "?" decoration
+			main.draw_string(font, Vector2(148, 140), "?",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.3, 0.55, 0.7))
+			main.draw_string(font, Vector2(630, 140), "?",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.3, 0.55, 0.7))
+		if main.current_event.has("description"):
+			var desc_lines: PackedStringArray = main.current_event["description"].split("\n")
+			for dl in range(desc_lines.size()):
+				var dline: String = desc_lines[dl]
+				var dl_sz := font.get_string_size(dline, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
+				main.draw_string(font, Vector2(400 - dl_sz.x / 2, 170 + dl * 18), dline,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.7, 0.75))
+		main.draw_line(Vector2(150, 220), Vector2(650, 220), Color(0.3, 0.5, 0.6, 0.4), 1.0)
+		if main.event_result_text != "":
+			# Show result
+			var rt_sz := font.get_string_size(main.event_result_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+			main.draw_string(font, Vector2(400 - rt_sz.x / 2, 310), main.event_result_text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.9, 0.5))
+			var cont_rect := Rect2(280, 370, 240, 40)
+			var cont_hovered: bool = cont_rect.has_point(main.mouse_pos)
+			main.draw_rect(cont_rect, Color(0.1, 0.14, 0.2) if not cont_hovered else Color(0.15, 0.2, 0.28))
+			main.draw_rect(cont_rect, Color(0.4, 0.7, 0.9), false, 1.5 if not cont_hovered else 2.5)
+			var cont_label := "Continue"
+			var cl_sz := font.get_string_size(cont_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
+			main.draw_string(font, Vector2(400 - cl_sz.x / 2, 396), cont_label,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.85, 1.0))
+		elif main.current_event.has("choices"):
+			# Show choice buttons
+			var choices: Array = main.current_event["choices"]
+			for i in range(choices.size()):
+				var choice: Dictionary = choices[i]
+				var choice_rect := Rect2(180, 240 + i * 60, 440, 50)
+				var hovered: bool = choice_rect.has_point(main.mouse_pos)
+				main.draw_rect(choice_rect, Color(0.08, 0.12, 0.18) if not hovered else Color(0.12, 0.18, 0.25))
+				main.draw_rect(choice_rect, Color(0.35, 0.6, 0.8) if not hovered else Color(0.5, 0.8, 1.0), false, 1.5)
+				main.draw_string(font, Vector2(195, 260 + i * 60), choice["label"],
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.8, 0.9, 1.0))
+				main.draw_string(font, Vector2(195, 276 + i * 60), choice["description"],
+					HORIZONTAL_ALIGNMENT_LEFT, 420, 11, Color(0.6, 0.6, 0.65))
 	elif main.run_overlay == "run_over":
 		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.6))
 		var msg := "RUN OVER"
