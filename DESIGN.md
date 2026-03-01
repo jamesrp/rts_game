@@ -2,7 +2,7 @@
 
 ## Elevator Pitch
 
-A single-player roguelike where each "combat encounter" is a short real-time strategy battle in the style of Mushroom Wars 2 / Zone Control. Between battles, the player navigates a branching map and collects upgrades that define their army identity — unit upgrades, hero powers, and passive bonuses. Think Slay the Spire, but instead of playing cards, you're commanding units to capture nodes.
+A single-player roguelike where each "combat encounter" is a short real-time strategy battle in the style of Mushroom Wars 2 / Zone Control. Between battles, the player navigates a branching map and collects upgrades that define their army identity — hero power upgrades, hero powers, and passive bonuses. Think Slay the Spire, but instead of playing cards, you're commanding units to capture nodes.
 
 The roguelike layer defines *what* your army is. The battle layer is a clean positional strategy game where you play that identity against varied opponents.
 
@@ -56,7 +56,7 @@ Each act presents a branching path of ~4–5 encounters. Node types on the meta-
 
 - **Battle**: standard encounter against an AI opponent.
 - **Elite**: harder battle with better rewards.
-- **Campfire**: restore run time, or forgo restoration to acquire a unit upgrade (see Campfire Choices below).
+- **Campfire**: restore run time, or forgo restoration to acquire a hero power upgrade (see Campfire Choices below).
 - **Event (?)**: random event — risk/reward choices, shops, special challenges.
 - **Boss**: mandatory battle at end of each act. Boss has a signature AI behavior and unique map layout.
 
@@ -148,7 +148,7 @@ Hero powers start at base effectiveness and grow stronger through relics and upg
 
 ## Army Identity: The Roguelike Progression System
 
-This is the "deck-building" equivalent. Instead of collecting cards, the player builds an **army identity** across the run — choosing unit upgrades, collecting hero power relics, and stacking passive modifiers. All army composition decisions happen *between* battles at campfires, events, and reward screens. In battle, the player focuses purely on positional strategy and hero power usage.
+This is the "deck-building" equivalent. Instead of collecting cards, the player builds an **army identity** across the run — choosing hero power upgrades, collecting hero power relics, and stacking passive modifiers. All army composition decisions happen *between* battles at campfires, events, and reward screens. In battle, the player focuses purely on positional strategy and hero power usage.
 
 ### Units
 
@@ -156,25 +156,42 @@ The player commands a single unit type throughout the run — balanced, general-
 
 **Why one unit type:** A single unit type keeps the battle layer clean and readable. The strategic depth comes from upgrades and hero powers that change *how* your units behave, not from managing multiple unit types in real time. This lets the player focus on positional decision-making — where to send, when to push, when to hold — without real-time army composition management.
 
-### Unit Upgrades (Campfire Choices)
+### Hero Power Upgrades (Campfire Choices)
 
 At campfire nodes, the player chooses between:
 
 - **Rest**: restore a portion of run time.
-- **Train**: acquire a unit upgrade that changes how your units behave.
+- **Train**: acquire a hero power upgrade that enhances one of your hero's abilities.
 
-Unit upgrades should **change how you play**, not just inflate numbers. Examples:
+Hero power upgrades should **change how you use your powers**, not just inflate numbers. They modify a specific hero power's behavior, adding new effects or altering how the ability works. Each upgrade is hero-specific — you only see upgrades for your current hero.
 
-- **Cloaked Arrival**: your units are briefly invisible when they arrive at a node, allowing surprise attacks.
-- **Siege Protocol**: your units deal double damage to nodes above level 3, but move 15% slower.
-- **Leech**: your units restore a small amount of run time for every enemy unit killed. *(Timer equivalent of healing.)*
-- **Volatile**: your units explode on death, damaging nearby enemy units at the same node.
-- **Entrenching**: units that garrison a node for 10+ seconds gain a defensive bonus.
-- **Flanking Instinct**: units that attack a node already under assault from another direction deal bonus damage.
-- **Blitz Training**: your units move 25% faster but have 15% less combat power.
-- **Last Stand**: units at a node deal increasing damage as the garrison shrinks below 25%.
+Examples per hero:
 
-These map to StarCraft-style upgrades conceptually (Stim, Blue Flame, Concussive Shells) — they give your army a distinct tactical personality that synergizes with your hero choice and passive modifiers.
+**Commander:**
+- **Rolling Thunder**: Rally Cry sends units in two waves — 30% immediately, then 20% more after 3 seconds.
+- **Double Time**: Forced March also increases unit combat power by 25% while active.
+- **War Economy**: Conscription generates more units at higher-level nodes (scaling bonus).
+- **Scorched Earth**: During Blitz, capturing an enemy node damages adjacent enemy nodes' garrisons.
+
+**Warden:**
+- **Reactive Armor**: Fortify reflects 20% of incoming damage back to attackers.
+- **Bunker Down**: Entrench also increases the node's generation rate by 50% while active.
+- **Chain Mines**: Minefield splits into two smaller traps on adjacent paths when triggered.
+- **Iron Curtain**: Citadel's bonus also spreads to adjacent owned nodes at half effectiveness.
+
+**Saboteur:**
+- **Rolling Blackout**: Sabotage spreads to one adjacent enemy node at half duration.
+- **Quicksand**: Blackout-slowed units also deal 25% less damage on arrival.
+- **Sleeper Cell**: Turncoat-converted units continue to convert 1 additional unit every 3 seconds for 10 seconds.
+- **Total Shutdown**: EMP also prevents enemy hero power usage for its duration.
+
+**Architect:**
+- **Overdrive**: Overclock's bonus generation also applies to adjacent owned nodes at half rate.
+- **Wormhole**: Supply Line-connected nodes can share units with any other owned node, not just each other.
+- **Deep Foundations**: Terraform'd nodes retain 1 bonus level permanently after the upgrade.
+- **Power Grid**: During Nexus, all nodes also share 10% of their garrison with their lowest-garrisoned neighbor every 3 seconds.
+
+These upgrades create meaningful build decisions at campfires — do you double down on your most-used power, or shore up a weaker one? They synergize with hero power relics, creating layered power scaling across the run.
 
 ### Passive Modifiers (≈ Relics)
 
@@ -222,18 +239,18 @@ Acquired through events or as the cost of powerful rewards:
 - **After normal battles**: pick 1 of 3 random passive modifiers.
 - **After elite battles**: pick 1 of 3 rare/powerful modifiers + gain an activated ability (or a hero-specific power relic).
 - **After bosses**: choose a powerful "boss relic" unique to that boss (may include hero power relics).
-- **Campfires**: restore run time or train a unit upgrade.
+- **Campfires**: restore run time or train a hero power upgrade.
 - **Events**: offer situational choices — e.g., "sacrifice 1:00 of act time to gain a strong modifier," "gamble: 50% chance of a great modifier, 50% chance of a curse."
 
 ### Build Archetypes (Emergent, Not Prescribed)
 
 Modifiers, hero powers, and upgrades should be designed so certain combinations are notably powerful:
 
-- **Blitz build**: Commander hero + speed modifiers + burst-on-capture + Blitz Training. Rally everything forward, cap fast, end fights in seconds.
-- **Fortress build**: Warden hero + capacity bonuses + Entrenching + adjacent drain. Lock down territory, let Citadel and Minefield do the heavy lifting.
-- **Sabotage build**: Saboteur hero + Cloaked Arrival + energy generation bonuses. Constantly disrupt the enemy while your units slip through unnoticed.
-- **Engine build**: Architect hero + node level preservation + Terraform + generation bonuses. Build an overwhelming economic machine that floods the map.
-- **Power build**: any hero + energy generation modifiers + "first power free" relic + cooldown-oriented upgrades. Win through constant hero power activations rather than raw unit strength.
+- **Blitz build**: Commander hero + speed modifiers + burst-on-capture + Scorched Earth upgrade. Rally everything forward, cap fast, end fights in seconds.
+- **Fortress build**: Warden hero + capacity bonuses + Iron Curtain upgrade + adjacent drain. Lock down territory, let Citadel and Minefield do the heavy lifting.
+- **Sabotage build**: Saboteur hero + Sleeper Cell upgrade + energy generation bonuses. Constantly disrupt the enemy while converted units spread chaos behind enemy lines.
+- **Engine build**: Architect hero + node level preservation + Deep Foundations upgrade + generation bonuses. Build an overwhelming economic machine that floods the map.
+- **Power build**: any hero + energy generation modifiers + "first power free" relic + hero power upgrades. Win through constant hero power activations rather than raw unit strength.
 
 -----
 
@@ -291,6 +308,6 @@ Theme is TBD but should be abstract enough to work with simple art:
 - **Energy economy tuning**: how fast does energy generate passively vs. from combat actions? If energy is too plentiful, hero powers lose their weight. If too scarce, they feel irrelevant. Each hero may need different tuning.
 - **Hero balance**: heroes need to feel different without one being strictly dominant. The Commander's offense vs. the Warden's defense should be a genuine playstyle choice, not a power ranking.
 - **Hero power relic density**: how often should hero-specific relics appear? Too rare and power scaling feels flat. Too common and the player is swimming in upgrades. Should hero relics compete with general relics in reward pools, or be offered separately?
-- **How many modifiers / upgrades / abilities for launch?** Target minimums for interesting runs: ~25 passive modifiers, ~5 activated abilities, ~10 events, ~12-15 unit upgrades, ~8-12 hero power relics per hero, 4 heroes. Enough that you don't see everything every run.
+- **How many modifiers / upgrades / abilities for launch?** Target minimums for interesting runs: ~25 passive modifiers, ~5 activated abilities, ~10 events, ~4 hero power upgrades per hero per power (16 per hero), ~8-12 hero power relics per hero, 4 heroes. Enough that you don't see everything every run.
 - **Difficulty scaling within a run**: acts need to get harder. Levers include: more enemy starting nodes, faster AI generation, tighter map layouts, AI personalities with scaling mechanics, higher-level starting nodes for the enemy, and reduced time restoration at campfires. Needs iteration and playtesting.
 - **Multiplayer someday**: the battle system is inherently PvP-friendly (both players have hero powers). A future mode could use the same battle maps for 1v1. Keep the architecture clean enough that this is possible but don't design around it now.

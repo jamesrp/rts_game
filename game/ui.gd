@@ -583,6 +583,20 @@ func draw_roguelike_map() -> void:
 				if available:
 					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
 					main.draw_arc(pos, 20.0, 0, TAU, 32, Color(1.0, 0.85, 0.2, pulse), 2.0)
+			elif node["type"] == "campfire":
+				var cf_col := Color(1.0, 0.55, 0.15) if available else Color(0.5, 0.28, 0.08)
+				main.draw_circle(pos, 15.0, Color(0.12, 0.06, 0.02))
+				main.draw_arc(pos, 15.0, 0, TAU, 32, cf_col, 2.5)
+				# Draw flame icon
+				var flame_sway: float = sin(main.game_time * 4.0) * 1.5 if available else 0.0
+				main.draw_line(pos + Vector2(-4, 5), pos + Vector2(-1 + flame_sway, -6), cf_col, 2.0)
+				main.draw_line(pos + Vector2(4, 5), pos + Vector2(1 + flame_sway, -6), cf_col, 2.0)
+				main.draw_line(pos + Vector2(0, 5), pos + Vector2(0 + flame_sway, -8), Color(1.0, 0.8, 0.2) if available else cf_col, 2.5)
+				main.draw_line(pos + Vector2(-6, 6), pos + Vector2(6, 4), cf_col, 2.0)
+				main.draw_line(pos + Vector2(-5, 4), pos + Vector2(5, 6), cf_col, 2.0)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
+					main.draw_arc(pos, 19.0, 0, TAU, 32, Color(1.0, 0.55, 0.15, pulse), 2.0)
 			elif node["type"] == "merchant":
 				var m_col := Color(0.9, 0.75, 0.15) if available else Color(0.45, 0.38, 0.08)
 				main.draw_circle(pos, 15.0, Color(0.12, 0.1, 0.02))
@@ -693,6 +707,88 @@ func draw_roguelike_map() -> void:
 		var ll_sz := font.get_string_size(ll, HORIZONTAL_ALIGNMENT_CENTER, -1, 15)
 		main.draw_string(font, Vector2(400 - ll_sz.x / 2, leave_rect.position.y + 23),
 			ll, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.75, 0.75, 0.85))
+	elif main.run_overlay == "campfire":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var panel := Rect2(155, 120, 490, 280)
+		main.draw_rect(panel, Color(0.1, 0.06, 0.02))
+		main.draw_rect(panel, Color(1.0, 0.55, 0.15), false, 2.0)
+		var cf_title := "CAMPFIRE"
+		var cf_sz := font.get_string_size(cf_title, HORIZONTAL_ALIGNMENT_CENTER, -1, 26)
+		main.draw_string(font, Vector2(400 - cf_sz.x / 2, 155), cf_title,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.7, 0.3))
+		var cf_sub := "Choose one:"
+		var cs_sz := font.get_string_size(cf_sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+		main.draw_string(font, Vector2(400 - cs_sz.x / 2, 178), cf_sub,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.6, 0.4))
+		# Time display
+		var cf_time_str: String = main._format_run_time()
+		var time_info := "Current time: " + cf_time_str
+		var ti_sz := font.get_string_size(time_info, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+		main.draw_string(font, Vector2(400 - ti_sz.x / 2, 195), time_info,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.6, 0.6, 0.65))
+		# Rest button
+		var rest_rect := Rect2(220, 250, 160, 60)
+		var rest_hovered: bool = rest_rect.has_point(main.mouse_pos)
+		main.draw_rect(rest_rect, Color(0.12, 0.15, 0.1) if not rest_hovered else Color(0.18, 0.22, 0.15))
+		main.draw_rect(rest_rect, Color(0.4, 0.8, 0.4), false, 1.5 if not rest_hovered else 2.5)
+		var rest_label := "REST"
+		var rl_sz := font.get_string_size(rest_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+		main.draw_string(font, Vector2(300 - rl_sz.x / 2, 275), rest_label,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.5, 0.9, 0.5))
+		var rest_desc := "Restore 3:00"
+		var rd_sz := font.get_string_size(rest_desc, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+		main.draw_string(font, Vector2(300 - rd_sz.x / 2, 295), rest_desc,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.6, 0.7, 0.6))
+		# Train button
+		var train_rect := Rect2(420, 250, 160, 60)
+		var has_upgrades: bool = main.campfire_upgrade_choices.size() > 0
+		var train_hovered: bool = train_rect.has_point(main.mouse_pos) and has_upgrades
+		main.draw_rect(train_rect, Color(0.12, 0.1, 0.15) if not train_hovered else Color(0.18, 0.15, 0.22))
+		var train_border := Color(0.7, 0.5, 1.0) if has_upgrades else Color(0.3, 0.3, 0.35)
+		main.draw_rect(train_rect, train_border, false, 1.5 if not train_hovered else 2.5)
+		var train_label := "TRAIN"
+		var tl_sz2 := font.get_string_size(train_label, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
+		var train_text_col := Color(0.7, 0.5, 1.0) if has_upgrades else Color(0.4, 0.4, 0.45)
+		main.draw_string(font, Vector2(500 - tl_sz2.x / 2, 275), train_label,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, train_text_col)
+		var train_desc := "Hero power upgrade" if has_upgrades else "No upgrades left"
+		var td_sz := font.get_string_size(train_desc, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+		main.draw_string(font, Vector2(500 - td_sz.x / 2, 295), train_desc,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.6, 0.55, 0.7) if has_upgrades else Color(0.4, 0.4, 0.45))
+		# Show acquired upgrades
+		if main.run_hero_upgrades.size() > 0:
+			var ug_label := "Acquired: " + ", ".join(main.run_hero_upgrades)
+			main.draw_string(font, Vector2(170, 370), ug_label,
+				HORIZONTAL_ALIGNMENT_LEFT, 460, 11, Color(0.55, 0.55, 0.6))
+	elif main.run_overlay == "campfire_train":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var panel := Rect2(80, 170, 640, 240)
+		main.draw_rect(panel, Color(0.08, 0.06, 0.12))
+		main.draw_rect(panel, Color(0.7, 0.5, 1.0), false, 2.0)
+		var tt := "TRAIN — Choose an Upgrade"
+		var tt_sz := font.get_string_size(tt, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
+		main.draw_string(font, Vector2(400 - tt_sz.x / 2, 202), tt,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.8, 0.6, 1.0))
+		for i in range(main.campfire_upgrade_choices.size()):
+			var upgrade: Dictionary = main.campfire_upgrade_choices[i]
+			var cx: float = 115.0 + i * 200.0
+			var card := Rect2(cx, 220, 170, 160)
+			var hovered: bool = card.has_point(main.mouse_pos)
+			main.draw_rect(card, Color(0.12, 0.1, 0.16) if not hovered else Color(0.18, 0.15, 0.22))
+			main.draw_rect(card, Color(0.7, 0.5, 1.0) if hovered else Color(0.35, 0.35, 0.4), false, 1.5 if not hovered else 2.5)
+			# Power name this upgrade applies to
+			var hero_data: Dictionary = GameData.HERO_DATA[main.run_hero]
+			var power_name: String = hero_data["powers"][upgrade["power_index"]]["name"]
+			var pn_sz := font.get_string_size(power_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+			main.draw_string(font, Vector2(cx + 85 - pn_sz.x / 2, 242), power_name,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, hero_data["color"].lerp(Color.WHITE, 0.3))
+			# Upgrade name
+			var un_sz := font.get_string_size(upgrade["name"], HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(cx + 85 - un_sz.x / 2, 270), upgrade["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.7, 1.0))
+			# Description with word wrap
+			main.draw_string(font, Vector2(cx + 10, 290), upgrade["desc"],
+				HORIZONTAL_ALIGNMENT_LEFT, 150, 11, Color(0.7, 0.7, 0.75))
 	elif main.run_overlay == "run_over":
 		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.6))
 		var msg := "RUN OVER"

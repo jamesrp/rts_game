@@ -14,6 +14,33 @@ const ARMY_WAVES_PER_SECOND: float = 3.0
 const UNIT_TRIANGLE_SIZE: float = 3.0
 const UNIT_FORMATION_SPACING: float = 7.0
 
+static var HERO_UPGRADES: Dictionary = {
+	"commander": [
+		{"name": "Rolling Thunder", "power_index": 0, "desc": "Rally Cry sends units in two waves: 30% then 20%"},
+		{"name": "Double Time", "power_index": 1, "desc": "Forced March also gives +25% combat power"},
+		{"name": "War Economy", "power_index": 2, "desc": "Conscription scales with node level (+2 per lvl)"},
+		{"name": "Scorched Earth", "power_index": 3, "desc": "Blitz captures damage adjacent enemy garrisons"},
+	],
+	"warden": [
+		{"name": "Reactive Armor", "power_index": 0, "desc": "Fortify reflects 20% damage to attackers"},
+		{"name": "Bunker Down", "power_index": 1, "desc": "Entrench also boosts generation +50%"},
+		{"name": "Chain Mines", "power_index": 2, "desc": "Minefield splits into 2 traps on trigger"},
+		{"name": "Iron Curtain", "power_index": 3, "desc": "Citadel bonus spreads to adjacent nodes at 50%"},
+	],
+	"saboteur": [
+		{"name": "Rolling Blackout", "power_index": 0, "desc": "Sabotage spreads to 1 adjacent enemy node"},
+		{"name": "Quicksand", "power_index": 1, "desc": "Blackout-slowed units deal 25% less damage"},
+		{"name": "Sleeper Cell", "power_index": 2, "desc": "Converted units keep converting 1 every 3s"},
+		{"name": "Total Shutdown", "power_index": 3, "desc": "EMP also blocks enemy hero powers"},
+	],
+	"architect": [
+		{"name": "Overdrive", "power_index": 0, "desc": "Overclock bonus spreads to adjacent nodes at 50%"},
+		{"name": "Wormhole", "power_index": 1, "desc": "Supply Line nodes share with any owned node"},
+		{"name": "Deep Foundations", "power_index": 2, "desc": "Terraform'd nodes keep +1 level permanently"},
+		{"name": "Power Grid", "power_index": 3, "desc": "Nexus shares 10% garrison to weakest neighbor"},
+	],
+}
+
 static var HERO_DATA: Dictionary = {
 	"commander": {
 		"name": "Commander",

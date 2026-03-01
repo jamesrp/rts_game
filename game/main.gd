@@ -52,7 +52,9 @@ var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
-var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward"
+var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire"
+var campfire_upgrade_choices: Array = []  # Array of upgrade dicts offered at campfire
+var run_hero_upgrades: Array = []  # Upgrade IDs (names) acquired during run
 var run_relics: Array = []
 var merchant_relics: Array = []
 var merchant_relics_bought: Array = []
@@ -165,6 +167,8 @@ func _start_roguelike_run() -> void:
 	run_last_node = -1
 	run_overlay = ""
 	run_relics = []
+	run_hero_upgrades = []
+	campfire_upgrade_choices = []
 	merchant_relics = []
 	merchant_relics_bought = []
 	reward_relics = []
@@ -221,6 +225,18 @@ func _generate_run_map(act: int) -> Array:
 	if merchant_candidates.size() > 0:
 		var mc: Array = merchant_candidates[0]
 		map[mc[0]][mc[1]]["type"] = "merchant"
+
+	# Assign 1 campfire node in middle rows (rows 1-3, not row 0 or boss row)
+	var campfire_candidates: Array = []
+	for row_idx in [1, 2, 3]:
+		if row_idx < map.size() - 1:
+			for col_idx in range(map[row_idx].size()):
+				if map[row_idx][col_idx]["type"] == "battle":
+					campfire_candidates.append([row_idx, col_idx])
+	campfire_candidates.shuffle()
+	if campfire_candidates.size() > 0:
+		var cc: Array = campfire_candidates[0]
+		map[cc[0]][cc[1]]["type"] = "campfire"
 
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
@@ -370,6 +386,41 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				_abandon_roguelike_run()
 		return
 
+	# Campfire overlay: handle rest/train clicks
+	if run_overlay == "campfire":
+		var rest_rect := Rect2(220, 250, 160, 60)
+		var train_rect := Rect2(420, 250, 160, 60)
+		if rest_rect.has_point(event.position):
+			run_time_left += 180.0  # restore 3:00
+			run_time_left = minf(run_time_left, 600.0)
+			sfx_click.play()
+			run_map[run_current_row][run_last_node]["completed"] = true
+			run_current_row += 1
+			run_overlay = ""
+			return
+		if train_rect.has_point(event.position):
+			if campfire_upgrade_choices.size() > 0:
+				run_overlay = "campfire_train"
+				sfx_click.play()
+			return
+		return
+
+	# Campfire train overlay: pick an upgrade
+	if run_overlay == "campfire_train":
+		for i in range(campfire_upgrade_choices.size()):
+			var card_x: float = 115.0 + i * 200.0
+			var card_rect := Rect2(card_x, 220, 170, 160)
+			if card_rect.has_point(event.position):
+				var upgrade: Dictionary = campfire_upgrade_choices[i]
+				run_hero_upgrades.append(upgrade["name"])
+				sfx_merchant[randi() % sfx_merchant.size()].play()
+				campfire_upgrade_choices.clear()
+				run_map[run_current_row][run_last_node]["completed"] = true
+				run_current_row += 1
+				run_overlay = ""
+				return
+		return
+
 	# Merchant overlay: handle shop button clicks
 	if run_overlay == "merchant":
 		var item_keys := ["speed", "attack", "defense"]
@@ -443,6 +494,10 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				merchant_relics = GameRelics.get_shop_relics(run_hero, run_relics)
 				merchant_relics_bought = []
 				run_overlay = "merchant"
+			elif node["type"] == "campfire":
+				run_last_node = col_idx
+				campfire_upgrade_choices = _get_campfire_upgrades()
+				run_overlay = "campfire"
 			else:
 				_start_roguelike_battle(col_idx)
 			return
@@ -1014,6 +1069,21 @@ func _power_nexus() -> void:
 
 func has_relic(id: String) -> bool:
 	return id in run_relics
+
+func has_hero_upgrade(name: String) -> bool:
+	return name in run_hero_upgrades
+
+func _get_campfire_upgrades() -> Array:
+	if run_hero == "" or not GameData.HERO_UPGRADES.has(run_hero):
+		return []
+	var all_upgrades: Array = GameData.HERO_UPGRADES[run_hero]
+	var available: Array = []
+	for u in all_upgrades:
+		if u["name"] not in run_hero_upgrades:
+			available.append(u)
+	available.shuffle()
+	var count: int = mini(3, available.size())
+	return available.slice(0, count)
 
 func _has_hero_effect(effect_type: String) -> bool:
 	for fx in hero_active_effects:
