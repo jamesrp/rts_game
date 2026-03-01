@@ -12,6 +12,13 @@ func resolve_arrival(unit_data: Dictionary) -> void:
 		target["units"] += 1
 	else:
 		if main._has_hero_effect_on("fortify", unit_data["target_id"]) and target["owner"] == "player":
+			# Reactive Armor: reflect 20% damage back to attacker's source building
+			for fx in main.hero_active_effects:
+				if fx["type"] == "fortify" and fx.get("target_id", -1) == unit_data["target_id"] and fx["timer"] < fx["duration"] and fx.get("reactive_armor", false):
+					var src_id: int = unit_data.get("source_id", -1)
+					if src_id >= 0 and src_id < main.buildings.size() and main.buildings[src_id]["owner"] == "opponent":
+						main.buildings[src_id]["units"] = maxi(0, main.buildings[src_id]["units"] - 1)
+					break
 			return
 
 		var A: float = 1.0
@@ -40,7 +47,8 @@ func resolve_arrival(unit_data: Dictionary) -> void:
 			target["owner"] = unit_data["owner"]
 			if target["type"] != "forge" and target["type"] != "tower":
 				if not main.has_relic("heritage"):
-					target["level"] = 1
+					var min_lvl: int = target.get("min_level", 1)
+					target["level"] = maxi(1, min_lvl)
 			target["gen_timer"] = 0.0
 			target["upgrading"] = false
 			target["upgrade_progress"] = 0.0
@@ -59,6 +67,15 @@ func resolve_arrival(unit_data: Dictionary) -> void:
 				"duration": 0.4,
 				"color": GameData.get_owner_color(unit_data["owner"]),
 			})
+			# Scorched Earth: blitz captures damage adjacent enemy garrisons
+			if unit_data["owner"] == "player":
+				for fx in main.hero_active_effects:
+					if fx["type"] == "blitz" and fx["timer"] < fx["duration"] and fx.get("scorched_earth", false):
+						for adj in main._get_adjacent_buildings(target["id"]):
+							if adj["owner"] == "opponent":
+								var dmg: int = maxi(1, int(adj["units"] * 0.2))
+								adj["units"] = maxi(0, adj["units"] - dmg)
+						break
 
 func update_towers(delta: float) -> void:
 	var units_to_remove: Array = []
@@ -131,6 +148,21 @@ func check_minefields() -> void:
 				"duration": 0.6,
 				"color": Color(1.0, 0.3, 0.1),
 			})
+			# Chain Mines: spawn 2 smaller traps offset from original
+			if fx.get("chain_mines", false):
+				var dir: Vector2 = (main.buildings[fx["node_b"]]["position"] - main.buildings[fx["node_a"]]["position"]).normalized()
+				var perp: Vector2 = Vector2(-dir.y, dir.x)
+				for offset in [-30.0, 30.0]:
+					main.hero_active_effects.append({
+						"type": "minefield",
+						"timer": 0.0,
+						"duration": 40.0,
+						"node_a": fx["node_a"],
+						"node_b": fx["node_b"],
+						"mid_pos": mid + perp * offset,
+						"triggered": false,
+						"chain_mines": false,
+					})
 			# Concertina Wire: add slow zone after minefield triggers
 			if main.has_relic("concertina_wire"):
 				main.hero_active_effects.append({
@@ -173,8 +205,20 @@ func get_attacker_multiplier(owner: String) -> float:
 	if main.in_roguelike_run and owner == "player":
 		attack_bonus = 10.0 * main.run_upgrades.get("attack", 0)
 	var base: float = (100.0 + forge_count * 10.0 + attack_bonus) / 100.0
+	# Quicksand: blackout-slowed enemies deal 25% less damage
+	if owner == "opponent":
+		for fx in main.hero_active_effects:
+			if fx["type"] == "blackout" and fx["timer"] < fx["duration"] and fx.get("quicksand", false):
+				base *= 0.75
+				break
 	if owner == "player" and main._has_hero_effect("blitz"):
 		base *= 2.0
+	# Double Time: forced march also gives +25% attack
+	if owner == "player":
+		for fx in main.hero_active_effects:
+			if fx["type"] == "forced_march" and fx["timer"] < fx["duration"] and fx.get("double_time", false):
+				base *= 1.25
+				break
 	if owner == "player" and main.has_relic("war_machine"):
 		base *= 1.3
 	return base

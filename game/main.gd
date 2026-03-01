@@ -552,7 +552,7 @@ func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary
 		if i in player_indices:
 			units.append(20)
 		elif i in opponent_indices:
-			units.append(15 + ai_level * 2)
+			units.append(10 + ai_level * 2)
 		else:
 			units.append(randi_range(5, 15))
 
@@ -730,6 +730,50 @@ func _update_hero_system(delta: float) -> void:
 			if fx["equalize_timer"] >= 2.0:
 				fx["equalize_timer"] -= 2.0
 				_apply_supply_line_equalize(fx)
+		# Power Grid: each player node shares 10% garrison to weakest neighbor every 3s
+		if fx["type"] == "nexus" and fx["timer"] < fx["duration"] and fx.get("power_grid", false):
+			fx["grid_timer"] += delta
+			if fx["grid_timer"] >= 3.0:
+				fx["grid_timer"] -= 3.0
+				for b in buildings:
+					if b["owner"] == "player" and b["type"] != "forge" and b["type"] != "tower":
+						var share: int = maxi(1, int(b["units"] * 0.1))
+						if share > 0 and b["units"] > share:
+							var weakest: Dictionary = {}
+							var weakest_units: int = 999999
+							for adj in _get_adjacent_buildings(b["id"]):
+								if adj["owner"] == "player" and adj["type"] != "forge" and adj["type"] != "tower" and adj["units"] < weakest_units:
+									weakest_units = adj["units"]
+									weakest = adj
+							if not weakest.is_empty() and weakest["units"] < b["units"]:
+								b["units"] -= share
+								weakest["units"] += share
+		# Sleeper Cell: convert 1 enemy unit every 3s
+		if fx["type"] == "sleeper_cell" and fx["timer"] < fx["duration"]:
+			fx["convert_timer"] += delta
+			if fx["convert_timer"] >= 3.0:
+				fx["convert_timer"] -= 3.0
+				var tid: int = fx["target_id"]
+				if tid >= 0 and tid < buildings.size() and buildings[tid]["owner"] == "opponent" and buildings[tid]["units"] > 0:
+					buildings[tid]["units"] -= 1
+					var nearest_id: int = -1
+					var nearest_dist: float = INF
+					for b in buildings:
+						if b["owner"] == "player":
+							var d: float = b["position"].distance_to(buildings[tid]["position"])
+							if d < nearest_dist:
+								nearest_dist = d
+								nearest_id = b["id"]
+					if nearest_id >= 0:
+						moving_units.append({
+							"source_id": tid,
+							"target_id": nearest_id,
+							"owner": "player",
+							"progress": 0.0,
+							"start_pos": buildings[tid]["position"],
+							"end_pos": buildings[nearest_id]["position"],
+							"lateral_offset": (randf() - 0.5) * 10.0,
+						})
 		if fx["timer"] >= fx["duration"]:
 			effects_to_remove.append(i)
 	effects_to_remove.reverse()
@@ -746,6 +790,22 @@ func _reset_hero_battle_state() -> void:
 	first_power_used = false
 
 func _apply_supply_line_equalize(fx: Dictionary) -> void:
+	# Wormhole: equalize across all player nodes
+	if fx.get("wormhole", false):
+		var player_nodes: Array = []
+		for b in buildings:
+			if b["owner"] == "player" and b["type"] != "forge" and b["type"] != "tower":
+				player_nodes.append(b)
+		if player_nodes.size() < 2:
+			return
+		var total: int = 0
+		for b in player_nodes:
+			total += b["units"]
+		var per_node: int = total / player_nodes.size()
+		var remainder: int = total % player_nodes.size()
+		for i in range(player_nodes.size()):
+			player_nodes[i]["units"] = per_node + (1 if i < remainder else 0)
+		return
 	var id_a: int = fx["node_a"]
 	var id_b: int = fx["node_b"]
 	if id_a < 0 or id_a >= buildings.size() or id_b < 0 or id_b >= buildings.size():
@@ -902,6 +962,7 @@ func _activate_hero_power_pair(index: int, node_a: int, node_b: int) -> void:
 
 # Commander powers
 func _power_rally_cry(target_id: int) -> void:
+	var rolling_thunder: bool = has_hero_upgrade("Rolling Thunder")
 	for b in buildings:
 		if b["owner"] == "player" and b["id"] != target_id and b["type"] != "forge" and b["type"] != "tower":
 			var rally_pct: float = 0.5 if has_relic("warchief_banner") else 0.3
@@ -916,18 +977,35 @@ func _power_rally_cry(target_id: int) -> void:
 					"start_pos": b["position"],
 					"end_pos": buildings[target_id]["position"],
 				})
+			# Rolling Thunder: second wave of 20%
+			if rolling_thunder:
+				var wave2: int = int(b["units"] * 0.2)
+				if wave2 > 0:
+					dispatch_queues.append({
+						"source_id": b["id"],
+						"target_id": target_id,
+						"owner": "player",
+						"remaining": wave2,
+						"wave_timer": 2.0,
+						"start_pos": b["position"],
+						"end_pos": buildings[target_id]["position"],
+					})
 
 func _power_forced_march() -> void:
 	hero_active_effects.append({
 		"type": "forced_march",
 		"timer": 0.0,
 		"duration": 8.0,
+		"double_time": has_hero_upgrade("Double Time"),
 	})
 
 func _power_conscription() -> void:
+	var war_economy: bool = has_hero_upgrade("War Economy")
 	for b in buildings:
 		if b["owner"] == "player" and b["type"] != "forge" and b["type"] != "tower":
 			var bonus: int = b["level"] * 3
+			if war_economy:
+				bonus += b["level"] * 2
 			b["units"] += bonus
 
 func _power_blitz() -> void:
@@ -936,6 +1014,7 @@ func _power_blitz() -> void:
 		"type": "blitz",
 		"timer": 0.0,
 		"duration": dur,
+		"scorched_earth": has_hero_upgrade("Scorched Earth"),
 	})
 
 # Warden powers
@@ -946,6 +1025,7 @@ func _power_fortify(target_id: int) -> void:
 		"timer": 0.0,
 		"duration": dur,
 		"target_id": target_id,
+		"reactive_armor": has_hero_upgrade("Reactive Armor"),
 	})
 	if has_relic("reinforced_walls") and target_id >= 0 and target_id < buildings.size():
 		buildings[target_id]["units"] += 5
@@ -956,6 +1036,7 @@ func _power_entrench(target_id: int) -> void:
 		"timer": 0.0,
 		"duration": 15.0,
 		"target_id": target_id,
+		"bunker_down": has_hero_upgrade("Bunker Down"),
 	})
 
 func _power_minefield(node_a: int, node_b: int) -> void:
@@ -969,6 +1050,7 @@ func _power_minefield(node_a: int, node_b: int) -> void:
 		"node_b": node_b,
 		"mid_pos": (pos_a + pos_b) / 2.0,
 		"triggered": false,
+		"chain_mines": has_hero_upgrade("Chain Mines"),
 	})
 
 func _power_citadel(target_id: int) -> void:
@@ -978,6 +1060,16 @@ func _power_citadel(target_id: int) -> void:
 		"duration": 20.0,
 		"target_id": target_id,
 	})
+	# Iron Curtain: spread citadel bonus to adjacent nodes at 50% (as citadel_spread)
+	if has_hero_upgrade("Iron Curtain"):
+		for adj in _get_adjacent_buildings(target_id):
+			if adj["owner"] == "player" and adj["type"] != "forge" and adj["type"] != "tower":
+				hero_active_effects.append({
+					"type": "citadel_spread",
+					"timer": 0.0,
+					"duration": 20.0,
+					"target_id": adj["id"],
+				})
 
 # Saboteur powers
 func _power_sabotage(target_id: int) -> void:
@@ -990,12 +1082,27 @@ func _power_sabotage(target_id: int) -> void:
 	})
 	if has_relic("deep_cover") and target_id >= 0 and target_id < buildings.size():
 		buildings[target_id]["units"] = buildings[target_id]["units"] / 2
+	# Rolling Blackout: spread to 1 adjacent enemy node
+	if has_hero_upgrade("Rolling Blackout"):
+		var adj_enemies: Array = []
+		for adj in _get_adjacent_buildings(target_id):
+			if adj["owner"] == "opponent" and adj["id"] != target_id:
+				adj_enemies.append(adj)
+		if adj_enemies.size() > 0:
+			var spread_target: Dictionary = adj_enemies[randi() % adj_enemies.size()]
+			hero_active_effects.append({
+				"type": "sabotage",
+				"timer": 0.0,
+				"duration": dur * 0.5,
+				"target_id": spread_target["id"],
+			})
 
 func _power_blackout() -> void:
 	hero_active_effects.append({
 		"type": "blackout",
 		"timer": 0.0,
 		"duration": 10.0,
+		"quicksand": has_hero_upgrade("Quicksand"),
 	})
 
 func _power_turncoat(target_id: int) -> void:
@@ -1024,13 +1131,28 @@ func _power_turncoat(target_id: int) -> void:
 					"end_pos": buildings[nearest_id]["position"],
 					"lateral_offset": (randf() - 0.5) * 10.0,
 				})
+	# Sleeper Cell: keep converting 1 unit every 3s for 15s
+	if has_hero_upgrade("Sleeper Cell") and target["owner"] == "opponent":
+		hero_active_effects.append({
+			"type": "sleeper_cell",
+			"timer": 0.0,
+			"duration": 15.0,
+			"target_id": target_id,
+			"convert_timer": 0.0,
+		})
 
 func _power_emp() -> void:
 	hero_active_effects.append({
 		"type": "emp",
 		"timer": 0.0,
 		"duration": 10.0,
+		"total_shutdown": has_hero_upgrade("Total Shutdown"),
 	})
+	# Total Shutdown: also drain 30% of all enemy garrisons
+	if has_hero_upgrade("Total Shutdown"):
+		for b in buildings:
+			if b["owner"] == "opponent" and b["type"] != "forge" and b["type"] != "tower":
+				b["units"] = maxi(0, b["units"] - int(b["units"] * 0.3))
 
 # Architect powers
 func _power_overclock(target_id: int) -> void:
@@ -1040,6 +1162,16 @@ func _power_overclock(target_id: int) -> void:
 		"duration": 12.0,
 		"target_id": target_id,
 	})
+	# Overdrive: spread overclock to adjacent nodes at 50% (1.5x gen)
+	if has_hero_upgrade("Overdrive"):
+		for adj in _get_adjacent_buildings(target_id):
+			if adj["owner"] == "player" and adj["type"] != "forge" and adj["type"] != "tower":
+				hero_active_effects.append({
+					"type": "overclock_spread",
+					"timer": 0.0,
+					"duration": 12.0,
+					"target_id": adj["id"],
+				})
 
 func _power_supply_line(node_a: int, node_b: int) -> void:
 	var dur: float = 25.0 if has_relic("grid_link") else 15.0
@@ -1050,6 +1182,7 @@ func _power_supply_line(node_a: int, node_b: int) -> void:
 		"node_a": node_a,
 		"node_b": node_b,
 		"equalize_timer": 0.0,
+		"wormhole": has_hero_upgrade("Wormhole"),
 	})
 
 func _power_terraform(target_id: int) -> void:
@@ -1058,6 +1191,10 @@ func _power_terraform(target_id: int) -> void:
 		var tf_amount: int = 3 if has_relic("rapid_expansion") else 2
 		b["level"] = mini(b["level"] + tf_amount, GameData.MAX_BUILDING_LEVEL)
 		b["max_capacity"] = GameData.BASE_CAPACITY * b["level"]
+		# Deep Foundations: mark node so it keeps +1 level even if captured and recaptured
+		if has_hero_upgrade("Deep Foundations"):
+			b["deep_foundations"] = true
+			b["min_level"] = maxi(b.get("min_level", 1), mini(b["level"], 2))
 		sfx_upgrade.play()
 
 func _power_nexus() -> void:
@@ -1065,6 +1202,8 @@ func _power_nexus() -> void:
 		"type": "nexus",
 		"timer": 0.0,
 		"duration": 15.0,
+		"power_grid": has_hero_upgrade("Power Grid"),
+		"grid_timer": 0.0,
 	})
 
 func has_relic(id: String) -> bool:
@@ -1072,6 +1211,14 @@ func has_relic(id: String) -> bool:
 
 func has_hero_upgrade(name: String) -> bool:
 	return name in run_hero_upgrades
+
+func _get_adjacent_buildings(node_id: int, max_dist: float = 160.0) -> Array:
+	var result: Array = []
+	var origin: Vector2 = buildings[node_id]["position"]
+	for b in buildings:
+		if b["id"] != node_id and origin.distance_to(b["position"]) <= max_dist:
+			result.append(b)
+	return result
 
 func _get_campfire_upgrades() -> Array:
 	if run_hero == "" or not GameData.HERO_UPGRADES.has(run_hero):
@@ -1121,9 +1268,21 @@ func _update_unit_generation(delta: float) -> void:
 		# Overclock: 3x gen rate
 		if b["owner"] == "player" and _has_hero_effect_on("overclock", b["id"]):
 			gen_mult *= 3.0
+		# Overdrive: overclock spread gives 1.5x gen
+		elif b["owner"] == "player" and _has_hero_effect_on("overclock_spread", b["id"]):
+			gen_mult *= 1.5
 		# Citadel: 3x gen rate and 2x cap
 		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
 			gen_mult *= 3.0
+		# Iron Curtain: citadel spread gives 1.5x gen
+		elif b["owner"] == "player" and _has_hero_effect_on("citadel_spread", b["id"]):
+			gen_mult *= 1.5
+		# Bunker Down: entrench also boosts generation +50%
+		if b["owner"] == "player":
+			for fx in hero_active_effects:
+				if fx["type"] == "entrench" and fx.get("target_id", -1) == b["id"] and fx["timer"] < fx["duration"] and fx.get("bunker_down", false):
+					gen_mult *= 1.5
+					break
 		# Relic: gen_boost +15% gen for player
 		if b["owner"] == "player" and has_relic("gen_boost"):
 			gen_mult *= 1.15
@@ -1133,6 +1292,8 @@ func _update_unit_generation(delta: float) -> void:
 		var max_cap: int = GameData.BASE_CAPACITY * level
 		if b["owner"] == "player" and _has_hero_effect_on("citadel", b["id"]):
 			max_cap *= 2
+		elif b["owner"] == "player" and _has_hero_effect_on("citadel_spread", b["id"]):
+			max_cap = int(max_cap * 1.5)
 		# Relic: deep_reserves +25% capacity for player
 		if b["owner"] == "player" and has_relic("deep_reserves"):
 			max_cap = int(max_cap * 1.25)
@@ -1561,6 +1722,11 @@ func _update_ai(delta: float) -> void:
 	if ai_timer < interval:
 		return
 	ai_timer -= interval
+
+	# Total Shutdown: EMP completely blocks AI actions
+	for fx in hero_active_effects:
+		if fx["type"] == "emp" and fx["timer"] < fx["duration"] and fx.get("total_shutdown", false):
+			return
 
 	var ai_buildings: Array = []
 	for b in buildings:
