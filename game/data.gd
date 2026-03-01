@@ -361,6 +361,37 @@ static func get_owner_color(owner: String) -> Color:
 static func ease_out_cubic(t: float) -> float:
 	return 1.0 - pow(1.0 - t, 3.0)
 
+# === UI Rect Constants ===
+
+static var CAMPFIRE_REST_RECT := Rect2(220, 250, 160, 60)
+static var CAMPFIRE_TRAIN_RECT := Rect2(420, 250, 160, 60)
+static var EVENT_DISMISS_RECT := Rect2(280, 370, 240, 40)
+static var MERCHANT_BUY_RECTS: Array = [Rect2(370, 199, 160, 32), Rect2(370, 254, 160, 32), Rect2(370, 309, 160, 32)]
+static var MERCHANT_LEAVE_RECT := Rect2(305, 506, 190, 34)
+static var TREASURE_CLAIM_RECT := Rect2(250, 260, 300, 80)
+static var ELITE_REWARD_CLAIM_RECT := Rect2(250, 260, 300, 80)
+
+static func get_campfire_upgrade_card_rect(i: int) -> Rect2:
+	return Rect2(115.0 + i * 200.0, 220, 170, 160)
+
+static func get_event_choice_rect(i: int) -> Rect2:
+	return Rect2(180, 240 + i * 60, 440, 50)
+
+static func get_merchant_relic_buy_rect(i: int) -> Rect2:
+	return Rect2(370, 389 + i * 55, 160, 32)
+
+static func get_boss_reward_card_rect(i: int) -> Rect2:
+	return Rect2(115.0 + i * 200.0, 220, 170, 160)
+
+# === Array Utilities ===
+
+static func remove_indices(arr: Array, indices: Array) -> void:
+	indices.sort()
+	for i in range(indices.size() - 1, -1, -1):
+		arr.remove_at(indices[i])
+
+# === Unit Position ===
+
 static func get_unit_position(u: Dictionary) -> Vector2:
 	var eased_t: float = ease_out_cubic(u["progress"])
 	var center: Vector2 = u["start_pos"].lerp(u["end_pos"], eased_t)

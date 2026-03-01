@@ -11,7 +11,7 @@ func resolve_arrival(unit_data: Dictionary) -> void:
 	if target["owner"] == unit_data["owner"]:
 		target["units"] += 1
 	else:
-		if main._has_hero_effect_on("fortify", unit_data["target_id"]) and target["owner"] == "player":
+		if main.hero.has_effect_on("fortify", unit_data["target_id"]) and target["owner"] == "player":
 			# Reactive Armor: reflect 20% damage back to attacker's source building
 			for fx in main.hero_active_effects:
 				if fx["type"] == "fortify" and fx.get("target_id", -1) == unit_data["target_id"] and fx["timer"] < fx["duration"] and fx.get("reactive_armor", false):
@@ -113,10 +113,7 @@ func update_towers(delta: float) -> void:
 				"color": GameData.get_owner_color(b["owner"]),
 			})
 			units_to_remove.append(best_idx)
-	units_to_remove.sort()
-	units_to_remove.reverse()
-	for idx in units_to_remove:
-		main.moving_units.remove_at(idx)
+	GameData.remove_indices(main.moving_units, units_to_remove)
 
 func check_minefields() -> void:
 	for fx in main.hero_active_effects:
@@ -137,10 +134,7 @@ func check_minefields() -> void:
 			var kill_count: int = maxi(1, int(units_to_remove.size() * 0.4))
 			units_to_remove.shuffle()
 			var killed: Array = units_to_remove.slice(0, kill_count)
-			killed.sort()
-			killed.reverse()
-			for idx in killed:
-				main.moving_units.remove_at(idx)
+			GameData.remove_indices(main.moving_units, killed)
 			main.visual_effects.append({
 				"type": "capture_pop",
 				"position": mid,
@@ -193,7 +187,7 @@ func get_defender_multiplier(building: Dictionary) -> float:
 	if main.in_roguelike_run and building["owner"] == "player":
 		defense_bonus = 10.0 * main.run_upgrades.get("defense", 0)
 	var base: float = (90.0 + building["level"] * 10.0 + forge_count * 10.0 + defense_bonus) / 100.0
-	if building["owner"] == "player" and main._has_hero_effect_on("entrench", building["id"]):
+	if building["owner"] == "player" and main.hero.has_effect_on("entrench", building["id"]):
 		base *= 1.5
 	if building["owner"] == "player" and main.has_relic("iron_bastion"):
 		base *= 1.3
@@ -211,7 +205,7 @@ func get_attacker_multiplier(owner: String) -> float:
 			if fx["type"] == "blackout" and fx["timer"] < fx["duration"] and fx.get("quicksand", false):
 				base *= 0.75
 				break
-	if owner == "player" and main._has_hero_effect("blitz"):
+	if owner == "player" and main.hero.has_effect("blitz"):
 		base *= 2.0
 	# Double Time: forced march also gives +25% attack
 	if owner == "player":

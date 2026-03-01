@@ -115,19 +115,19 @@ func draw_buildings() -> void:
 
 		if main.in_roguelike_run and main.run_hero != "":
 			var effect_icons: Array = []
-			if main._has_hero_effect_on("fortify", b["id"]):
+			if main.hero.has_effect_on("fortify", b["id"]):
 				effect_icons.append({"label": "F", "color": Color(0.3, 0.8, 1.0)})
 				var pulse: float = 0.5 + 0.3 * sin(main.game_time * 3.0)
 				main.draw_arc(pos, radius + 3, 0, TAU, 48, Color(0.3, 0.8, 1.0, pulse), 2.5)
-			if main._has_hero_effect_on("entrench", b["id"]):
+			if main.hero.has_effect_on("entrench", b["id"]):
 				effect_icons.append({"label": "E", "color": Color(0.2, 0.7, 0.9)})
-			if main._has_hero_effect_on("citadel", b["id"]):
+			if main.hero.has_effect_on("citadel", b["id"]):
 				effect_icons.append({"label": "C", "color": Color(0.2, 0.7, 0.9)})
 				var pulse2: float = 0.4 + 0.3 * sin(main.game_time * 2.0)
 				main.draw_arc(pos, radius + 5, 0, TAU, 48, Color(0.2, 0.7, 0.9, pulse2), 3.0)
-			if main._has_hero_effect_on("sabotage", b["id"]):
+			if main.hero.has_effect_on("sabotage", b["id"]):
 				effect_icons.append({"label": "S", "color": Color(0.6, 0.2, 0.8)})
-			if main._has_hero_effect_on("overclock", b["id"]):
+			if main.hero.has_effect_on("overclock", b["id"]):
 				effect_icons.append({"label": "O", "color": Color(0.2, 0.8, 0.4)})
 				var pulse3: float = 0.3 + 0.3 * sin(main.game_time * 5.0)
 				main.draw_arc(pos, radius + 3, 0, TAU, 48, Color(0.2, 0.8, 0.4, pulse3), 2.0)
@@ -517,7 +517,7 @@ func draw_roguelike_map() -> void:
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.2))
 	draw_run_upgrade_icons(Vector2(30, 48), 14.0)
 
-	var time_str: String = main._format_run_time()
+	var time_str: String = main.roguelike.format_run_time()
 	var time_col := Color(0.9, 0.9, 0.9)
 	if main.run_time_left < 30.0:
 		time_col = Color(1.0, 0.3, 0.3) if int(main.game_time * 2.0) % 2 == 0 else Color(0.8, 0.15, 0.15)
@@ -679,7 +679,7 @@ func draw_roguelike_map() -> void:
 		var item_descs  := ["+10% movement speed",  "+10% attack power",   "+10% defense"        ]
 		var item_colors := [Color(0.35, 0.75, 1.0), Color(1.0, 0.5, 0.25), Color(0.35, 0.9, 0.45)]
 		var item_ys     := [200,                    255,                   310                   ]
-		var buy_rects   := [Rect2(370, 199, 160, 32), Rect2(370, 254, 160, 32), Rect2(370, 309, 160, 32)]
+		var buy_rects: Array = GameData.MERCHANT_BUY_RECTS
 		var can_buy: bool = main.run_gold >= 80
 		for i in range(3):
 			var lvl: int = main.run_upgrades.get(item_keys[i], 0)
@@ -717,7 +717,7 @@ func draw_roguelike_map() -> void:
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, rcol if not is_bought else Color(0.4, 0.4, 0.45))
 			main.draw_string(font, Vector2(200, ry + 27), relic_data["description"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.65, 0.65, 0.72) if not is_bought else Color(0.35, 0.35, 0.4))
-			var relic_buy_rect := Rect2(370, 389 + i * 55, 160, 32)
+			var relic_buy_rect: Rect2 = GameData.get_merchant_relic_buy_rect(i)
 			if is_bought:
 				var sold_sz := font.get_string_size("SOLD", HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
 				main.draw_string(font, Vector2(relic_buy_rect.position.x + (relic_buy_rect.size.x - sold_sz.x) / 2, relic_buy_rect.position.y + 22),
@@ -730,7 +730,7 @@ func draw_roguelike_map() -> void:
 				var rbl_sz := font.get_string_size(rbl, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
 				main.draw_string(font, Vector2(relic_buy_rect.position.x + (relic_buy_rect.size.x - rbl_sz.x) / 2, relic_buy_rect.position.y + 22),
 					rbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, rcol if relic_can_buy else Color(0.35, 0.35, 0.35))
-		var leave_rect := Rect2(305, 506, 190, 34)
+		var leave_rect: Rect2 = GameData.MERCHANT_LEAVE_RECT
 		main.draw_rect(leave_rect, Color(0.1, 0.1, 0.16))
 		main.draw_rect(leave_rect, Color(0.3, 0.3, 0.45), false, 1.5)
 		var ll := "Leave Shop"
@@ -751,13 +751,13 @@ func draw_roguelike_map() -> void:
 		main.draw_string(font, Vector2(400 - cs_sz.x / 2, 178), cf_sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.6, 0.4))
 		# Time display
-		var cf_time_str: String = main._format_run_time()
+		var cf_time_str: String = main.roguelike.format_run_time()
 		var time_info := "Current time: " + cf_time_str
 		var ti_sz := font.get_string_size(time_info, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
 		main.draw_string(font, Vector2(400 - ti_sz.x / 2, 195), time_info,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.6, 0.6, 0.65))
 		# Rest button
-		var rest_rect := Rect2(220, 250, 160, 60)
+		var rest_rect: Rect2 = GameData.CAMPFIRE_REST_RECT
 		var rest_hovered: bool = rest_rect.has_point(main.mouse_pos)
 		main.draw_rect(rest_rect, Color(0.12, 0.15, 0.1) if not rest_hovered else Color(0.18, 0.22, 0.15))
 		main.draw_rect(rest_rect, Color(0.4, 0.8, 0.4), false, 1.5 if not rest_hovered else 2.5)
@@ -770,7 +770,7 @@ func draw_roguelike_map() -> void:
 		main.draw_string(font, Vector2(300 - rd_sz.x / 2, 295), rest_desc,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.6, 0.7, 0.6))
 		# Train button
-		var train_rect := Rect2(420, 250, 160, 60)
+		var train_rect: Rect2 = GameData.CAMPFIRE_TRAIN_RECT
 		var has_upgrades: bool = main.campfire_upgrade_choices.size() > 0
 		var train_hovered: bool = train_rect.has_point(main.mouse_pos) and has_upgrades
 		main.draw_rect(train_rect, Color(0.12, 0.1, 0.15) if not train_hovered else Color(0.18, 0.15, 0.22))
@@ -801,8 +801,8 @@ func draw_roguelike_map() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.8, 0.6, 1.0))
 		for i in range(main.campfire_upgrade_choices.size()):
 			var upgrade: Dictionary = main.campfire_upgrade_choices[i]
-			var cx: float = 115.0 + i * 200.0
-			var card := Rect2(cx, 220, 170, 160)
+			var card: Rect2 = GameData.get_campfire_upgrade_card_rect(i)
+			var cx: float = card.position.x
 			var hovered: bool = card.has_point(main.mouse_pos)
 			main.draw_rect(card, Color(0.12, 0.1, 0.16) if not hovered else Color(0.18, 0.15, 0.22))
 			main.draw_rect(card, Color(0.7, 0.5, 1.0) if hovered else Color(0.35, 0.35, 0.4), false, 1.5 if not hovered else 2.5)
@@ -847,7 +847,7 @@ func draw_roguelike_map() -> void:
 			var rt_sz := font.get_string_size(main.event_result_text, HORIZONTAL_ALIGNMENT_CENTER, -1, 16)
 			main.draw_string(font, Vector2(400 - rt_sz.x / 2, 310), main.event_result_text,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.9, 0.5))
-			var cont_rect := Rect2(280, 370, 240, 40)
+			var cont_rect: Rect2 = GameData.EVENT_DISMISS_RECT
 			var cont_hovered: bool = cont_rect.has_point(main.mouse_pos)
 			main.draw_rect(cont_rect, Color(0.1, 0.14, 0.2) if not cont_hovered else Color(0.15, 0.2, 0.28))
 			main.draw_rect(cont_rect, Color(0.4, 0.7, 0.9), false, 1.5 if not cont_hovered else 2.5)
@@ -860,7 +860,7 @@ func draw_roguelike_map() -> void:
 			var choices: Array = main.current_event["choices"]
 			for i in range(choices.size()):
 				var choice: Dictionary = choices[i]
-				var choice_rect := Rect2(180, 240 + i * 60, 440, 50)
+				var choice_rect: Rect2 = GameData.get_event_choice_rect(i)
 				var hovered: bool = choice_rect.has_point(main.mouse_pos)
 				main.draw_rect(choice_rect, Color(0.08, 0.12, 0.18) if not hovered else Color(0.12, 0.18, 0.25))
 				main.draw_rect(choice_rect, Color(0.35, 0.6, 0.8) if not hovered else Color(0.5, 0.8, 1.0), false, 1.5)
@@ -954,8 +954,8 @@ func draw_roguelike_map() -> void:
 		for i in range(main.reward_relics.size()):
 			var rid: String = main.reward_relics[i]
 			var rd: Dictionary = GameRelics.RELICS[rid]
-			var cx: float = 115.0 + i * 200.0
-			var card := Rect2(cx, 220, 170, 160)
+			var card: Rect2 = GameData.get_boss_reward_card_rect(i)
+			var cx: float = card.position.x
 			var hovered: bool = card.has_point(main.mouse_pos)
 			main.draw_rect(card, Color(0.12, 0.1, 0.16) if not hovered else Color(0.18, 0.15, 0.22))
 			main.draw_rect(card, rd["color"] if hovered else Color(0.35, 0.35, 0.4), false, 1.5 if not hovered else 2.5)
@@ -1131,7 +1131,7 @@ func draw_hud() -> void:
 		main.draw_rect(Rect2(rbar_x, rbar_y, rbar_w, rbar_h), Color(0.1, 0.12, 0.1))
 		var rfill: float = rbar_w * clampf(main.run_time_left / 600.0, 0.0, 1.0)
 		main.draw_rect(Rect2(rbar_x, rbar_y, rfill, rbar_h), rt_col)
-		var time_str: String = main._format_run_time()
+		var time_str: String = main.roguelike.format_run_time()
 		var rtxt_col := Color(0.85, 1.0, 0.85)
 		if main.run_time_left < 30.0:
 			rtxt_col = Color(1.0, 0.3, 0.3) if int(main.game_time * 2.0) % 2 == 0 else Color(0.7, 0.1, 0.1)
