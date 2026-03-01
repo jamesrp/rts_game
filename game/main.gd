@@ -50,6 +50,8 @@ var run_act: int = 1
 var run_gold: int = 0
 var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
+var run_map_scroll: float = 0.0
+var run_map_scroll_manual: bool = false
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
 var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire", "event", "treasure"
@@ -181,24 +183,27 @@ func _start_roguelike_run() -> void:
 	first_power_used = false
 	drain_field_timer = 0.0
 	_reset_hero_battle_state()
-	run_map = _generate_run_map(run_act)
+	run_map = _generate_run_map()
+	run_map_scroll = clampf(run_map[0][0]["position"].y - 480.0, -50.0, 400.0)
+	run_map_scroll_manual = false
 	game_state = "roguelike_map"
 
-func _generate_run_map(act: int) -> Array:
+func _generate_run_map() -> Array:
 	var map: Array = []
-	var row_counts: Array = [3, 3, 4, 3, 1]
+	var row_counts: Array = [3, 3, 3, 3, 3, 3, 4, 3, 3, 3, 3, 4, 3, 3, 3, 1]
 
+	# Create nodes with random types based on act distribution
 	for row_idx in range(row_counts.size()):
 		var row: Array = []
 		var count: int = row_counts[row_idx]
 		for col_idx in range(count):
 			var node_type: String
-			if row_idx == row_counts.size() - 1:
+			if row_idx == 15:
 				node_type = "boss"
 			else:
-				node_type = "battle"
+				node_type = _roll_map_node_type(row_idx)
 			var x: float = GameData.get_map_node_x(col_idx, count)
-			var y: float = 500.0 - row_idx * 95.0
+			var y: float = 830.0 - row_idx * 50.0
 			row.append({
 				"type": node_type,
 				"completed": false,
@@ -206,67 +211,6 @@ func _generate_run_map(act: int) -> Array:
 				"next_edges": [],
 			})
 		map.append(row)
-
-	# Assign 1-2 elite nodes in middle rows (rows 1-2, i.e. map rows II-III)
-	var elite_candidates: Array = []  # [row_idx, col_idx] pairs
-	for row_idx in [1, 2]:
-		if row_idx < map.size():
-			for col_idx in range(map[row_idx].size()):
-				if map[row_idx][col_idx]["type"] == "battle":
-					elite_candidates.append([row_idx, col_idx])
-	elite_candidates.shuffle()
-	var elite_count: int = 1 + (randi() % 2)  # 1 or 2
-	for i in range(mini(elite_count, elite_candidates.size())):
-		var rc: Array = elite_candidates[i]
-		map[rc[0]][rc[1]]["type"] = "elite"
-
-	# Assign 1 merchant node in a middle row (rows 1-3, not row 0 or boss row)
-	var merchant_candidates: Array = []
-	for row_idx in [1, 2, 3]:
-		if row_idx < map.size() - 1:  # not boss row
-			for col_idx in range(map[row_idx].size()):
-				if map[row_idx][col_idx]["type"] == "battle":
-					merchant_candidates.append([row_idx, col_idx])
-	merchant_candidates.shuffle()
-	if merchant_candidates.size() > 0:
-		var mc: Array = merchant_candidates[0]
-		map[mc[0]][mc[1]]["type"] = "merchant"
-
-	# Assign 1 campfire node in middle rows (rows 1-3, not row 0 or boss row)
-	var campfire_candidates: Array = []
-	for row_idx in [1, 2, 3]:
-		if row_idx < map.size() - 1:
-			for col_idx in range(map[row_idx].size()):
-				if map[row_idx][col_idx]["type"] == "battle":
-					campfire_candidates.append([row_idx, col_idx])
-	campfire_candidates.shuffle()
-	if campfire_candidates.size() > 0:
-		var cc: Array = campfire_candidates[0]
-		map[cc[0]][cc[1]]["type"] = "campfire"
-
-	# Assign 1 event node in middle rows (rows 1-3, not row 0 or boss row)
-	var event_candidates: Array = []
-	for row_idx in [1, 2, 3]:
-		if row_idx < map.size() - 1:
-			for col_idx in range(map[row_idx].size()):
-				if map[row_idx][col_idx]["type"] == "battle":
-					event_candidates.append([row_idx, col_idx])
-	event_candidates.shuffle()
-	if event_candidates.size() > 0:
-		var ec: Array = event_candidates[0]
-		map[ec[0]][ec[1]]["type"] = "event"
-
-	# Assign 1 treasure node in middle rows (rows 1-3, not row 0 or boss row)
-	var treasure_candidates: Array = []
-	for row_idx in [1, 2, 3]:
-		if row_idx < map.size() - 1:
-			for col_idx in range(map[row_idx].size()):
-				if map[row_idx][col_idx]["type"] == "battle":
-					treasure_candidates.append([row_idx, col_idx])
-	treasure_candidates.shuffle()
-	if treasure_candidates.size() > 0:
-		var tc: Array = treasure_candidates[0]
-		map[tc[0]][tc[1]]["type"] = "treasure"
 
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
@@ -278,12 +222,10 @@ func _generate_run_map(act: int) -> Array:
 			incoming[i] = false
 
 		for col_idx in range(cur_row.size()):
-			# Natural mapping based on position ratio
 			var natural: int = int(float(col_idx) / float(cur_row.size()) * float(nxt_row.size()))
 			natural = clampi(natural, 0, nxt_row.size() - 1)
 			cur_row[col_idx]["next_edges"].append(natural)
 			incoming[natural] = true
-			# 50% chance to also connect to an adjacent node
 			if randf() < 0.5:
 				var alt: int = natural + (1 if randf() < 0.5 else -1)
 				alt = clampi(alt, 0, nxt_row.size() - 1)
@@ -291,14 +233,76 @@ func _generate_run_map(act: int) -> Array:
 					cur_row[col_idx]["next_edges"].append(alt)
 					incoming[alt] = true
 
-		# Ensure every next-row node has at least one incoming edge
 		for i in range(nxt_row.size()):
 			if not incoming[i]:
 				var closest: int = clampi(int(float(i) / float(nxt_row.size()) * float(cur_row.size())), 0, cur_row.size() - 1)
 				if i not in cur_row[closest]["next_edges"]:
 					cur_row[closest]["next_edges"].append(i)
 
+	# Override Rule 1: Floor 1 (index 0) = all monsters
+	for node in map[0]:
+		node["type"] = "battle"
+	# Override Rule 1: Floor 9 (index 8) = all treasure
+	for node in map[8]:
+		node["type"] = "treasure"
+	# Override Rule 1: Floor 15 (index 14) = all rest sites
+	for node in map[14]:
+		node["type"] = "campfire"
+
+	# Override Rule 3: No elite or rest sites below floor 6 (indices 0-4)
+	for row_idx in range(5):
+		for node in map[row_idx]:
+			if node["type"] == "elite" or node["type"] == "campfire":
+				node["type"] = "battle"
+
+	# Override Rule 2: No consecutive elite, merchant, or campfire
+	var restricted_types: Array = ["elite", "merchant", "campfire"]
+	var protected_rows: Array = [0, 8, 14, 15]
+	for _pass in range(10):
+		var changed: bool = false
+		for row_idx in range(map.size() - 1):
+			for col_idx in range(map[row_idx].size()):
+				var node: Dictionary = map[row_idx][col_idx]
+				if node["type"] not in restricted_types:
+					continue
+				for next_col in node["next_edges"]:
+					var next_node: Dictionary = map[row_idx + 1][next_col]
+					if next_node["type"] not in restricted_types:
+						continue
+					if row_idx + 1 not in protected_rows:
+						next_node["type"] = "battle"
+						changed = true
+					elif row_idx not in protected_rows:
+						node["type"] = "battle"
+						changed = true
+		if not changed:
+			break
+
 	return map
+
+func _roll_map_node_type(floor_idx: int) -> String:
+	var act: int = 1 + floor_idx / 5
+	var roll: float = randf()
+	if act == 1:
+		# Elite 8%, Normal 53%, Event 22%, Campfire 12%, Merchant 5%
+		if roll < 0.08: return "elite"
+		roll -= 0.08
+		if roll < 0.53: return "battle"
+		roll -= 0.53
+		if roll < 0.22: return "event"
+		roll -= 0.22
+		if roll < 0.12: return "campfire"
+		return "merchant"
+	else:
+		# Elite 16%, Normal 45%, Event 22%, Campfire 12%, Merchant 5%
+		if roll < 0.16: return "elite"
+		roll -= 0.16
+		if roll < 0.45: return "battle"
+		roll -= 0.45
+		if roll < 0.22: return "event"
+		roll -= 0.22
+		if roll < 0.12: return "campfire"
+		return "merchant"
 
 func _is_node_available(row: int, col: int) -> bool:
 	if row != run_current_row:
@@ -318,19 +322,16 @@ func _start_roguelike_battle(col: int) -> void:
 	run_last_node = col
 	var node_type: String = run_map[run_current_row][col]["type"]
 	var is_elite: bool = node_type == "elite"
+	var floor_idx: int = run_current_row  # 0-indexed
+	var difficulty_factor: float = 1.0 + float(floor_idx) / 14.0  # 1.0 at floor 1, ~2.0 at floor 15
 	var ai_level: int
 	if node_type == "boss":
-		ai_level = clampi(run_act + 1, 2, 4)
+		ai_level = 4
 	else:
-		match run_act:
-			1: ai_level = 1 + (randi() % 2)
-			2: ai_level = 2 + (randi() % 2)
-			_: ai_level = 3 + (randi() % 2)
-		# Later rows within an act push toward higher difficulty
-		ai_level += run_current_row / 2
+		ai_level = 1 + floor_idx / 5  # 1 for floors 1-5, 2 for 6-10, 3 for 11-15
 		ai_level = clampi(ai_level, 1, 4)
 	in_roguelike_run = true
-	var config: Dictionary = _generate_roguelike_battle_map(ai_level, is_elite)
+	var config: Dictionary = _generate_roguelike_battle_map(ai_level, is_elite, difficulty_factor)
 	_start_level("ai", ai_level, config)
 
 func _return_from_roguelike_battle() -> void:
@@ -385,14 +386,7 @@ func _return_from_roguelike_battle() -> void:
 		game_state = "roguelike_map"
 
 func _advance_after_boss() -> void:
-	if run_act >= 3:
-		run_overlay = "run_won"
-	else:
-		run_act += 1
-		run_time_left = 600.0
-		run_map = _generate_run_map(run_act)
-		run_current_row = 0
-		run_last_node = -1
+	run_overlay = "run_won"
 
 func _claim_relic(relic_id: String) -> void:
 	if relic_id == "" or relic_id in run_relics:
@@ -410,6 +404,17 @@ func _abandon_roguelike_run() -> void:
 	run_map.clear()
 
 func _input_roguelike_map(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and run_overlay == "":
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			run_map_scroll -= 40.0
+			run_map_scroll = clampf(run_map_scroll, -50.0, 400.0)
+			run_map_scroll_manual = true
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			run_map_scroll += 40.0
+			run_map_scroll = clampf(run_map_scroll, -50.0, 400.0)
+			run_map_scroll_manual = true
+			return
 	if not (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed):
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			if run_overlay == "":
@@ -554,7 +559,8 @@ func _input_roguelike_map(event: InputEvent) -> void:
 		return
 	for col_idx in range(run_map[run_current_row].size()):
 		var node: Dictionary = run_map[run_current_row][col_idx]
-		if node["position"].distance_to(event.position) <= 22.0 and _is_node_available(run_current_row, col_idx):
+		var screen_pos: Vector2 = node["position"] - Vector2(0, run_map_scroll)
+		if screen_pos.distance_to(event.position) <= 22.0 and _is_node_available(run_current_row, col_idx):
 			sfx_click.play()
 			if node["type"] == "merchant":
 				run_last_node = col_idx
@@ -578,7 +584,7 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				_start_roguelike_battle(col_idx)
 			return
 
-func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary:
+func _generate_roguelike_battle_map(ai_level: int, is_elite: bool, difficulty_factor: float = 1.0) -> Dictionary:
 	var node_count: int = randi_range(10, 14) + ai_level
 	if is_elite:
 		node_count += 1
@@ -628,7 +634,7 @@ func _generate_roguelike_battle_map(ai_level: int, is_elite: bool) -> Dictionary
 		if i in player_indices:
 			units.append(20)
 		elif i in opponent_indices:
-			units.append(10 + int(ai_level * 1.5))
+			units.append(int((10 + ai_level * 1.5) * difficulty_factor))
 		else:
 			units.append(randi_range(5, 15))
 
@@ -748,6 +754,14 @@ func _process(delta: float) -> void:
 		return
 	if game_state == "roguelike_map":
 		game_time += delta
+		if run_current_row < run_map.size():
+			var target_y: float = run_map[run_current_row][0]["position"].y
+			var scroll_target: float = target_y - 480.0
+			scroll_target = clampf(scroll_target, -50.0, 400.0)
+			if not run_map_scroll_manual:
+				run_map_scroll = lerpf(run_map_scroll, scroll_target, minf(delta * 5.0, 1.0))
+			elif absf(run_map_scroll - scroll_target) < 5.0:
+				run_map_scroll_manual = false
 		queue_redraw()
 		return
 

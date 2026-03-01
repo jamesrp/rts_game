@@ -505,10 +505,12 @@ func draw_roguelike_map() -> void:
 	draw_background()
 	var font := ThemeDB.fallback_font
 
-	var title := "ACT %d" % main.run_act
-	var title_size := font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 28)
+	var scroll_offset := Vector2(0, main.run_map_scroll)
+	var current_act: int = 1 + mini(main.run_current_row, 14) / 5
+	var title := "ACT %d  -  FLOOR %d/16" % [current_act, main.run_current_row + 1]
+	var title_size := font.get_string_size(title, HORIZONTAL_ALIGNMENT_CENTER, -1, 22)
 	main.draw_string(font, Vector2(400 - title_size.x / 2, 40), title,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(0.9, 0.85, 0.6))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.9, 0.85, 0.6))
 
 	var gold_text := "Gold: %d" % main.run_gold
 	main.draw_string(font, Vector2(30, 40), gold_text,
@@ -537,6 +539,9 @@ func draw_roguelike_map() -> void:
 	for row_idx in range(main.run_map.size() - 1):
 		for col_idx in range(main.run_map[row_idx].size()):
 			var node: Dictionary = main.run_map[row_idx][col_idx]
+			var node_screen: Vector2 = node["position"] - scroll_offset
+			if node_screen.y < -50 or node_screen.y > 650:
+				continue
 			for next_col in node["next_edges"]:
 				var next_node: Dictionary = main.run_map[row_idx + 1][next_col]
 				var edge_color := Color(0.3, 0.3, 0.4)
@@ -547,12 +552,14 @@ func draw_roguelike_map() -> void:
 						edge_color = Color(0.25, 0.25, 0.3)
 				elif row_idx == main.run_current_row and main._is_node_available(row_idx, col_idx):
 					edge_color = Color(0.4, 0.5, 0.7, 0.5)
-				main.draw_line(node["position"], next_node["position"], edge_color, 2.0)
+				main.draw_line(node_screen, next_node["position"] - scroll_offset, edge_color, 2.0)
 
 	for row_idx in range(main.run_map.size()):
 		for col_idx in range(main.run_map[row_idx].size()):
 			var node: Dictionary = main.run_map[row_idx][col_idx]
-			var pos: Vector2 = node["position"]
+			var pos: Vector2 = node["position"] - scroll_offset
+			if pos.y < -30 or pos.y > 630:
+				continue
 			var available: bool = main._is_node_available(row_idx, col_idx)
 
 			if node["completed"]:
@@ -639,14 +646,15 @@ func draw_roguelike_map() -> void:
 				main.draw_circle(pos, 12.0, Color(0.12, 0.12, 0.16))
 				main.draw_arc(pos, 12.0, 0, TAU, 32, Color(0.25, 0.25, 0.3), 1.5)
 
-	var row_labels: Array = ["I", "II", "III", "IV", "BOSS"]
 	for row_idx in range(main.run_map.size()):
-		var y: float = main.run_map[row_idx][0]["position"].y + 5
-		var lbl: String = row_labels[row_idx] if row_idx < row_labels.size() else str(row_idx + 1)
+		var y: float = main.run_map[row_idx][0]["position"].y - main.run_map_scroll + 5
+		if y < -20 or y > 620:
+			continue
+		var lbl: String = "BOSS" if row_idx == 15 else str(row_idx + 1)
 		main.draw_string(font, Vector2(30, y), lbl,
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.35, 0.35, 0.4))
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.35, 0.35, 0.4))
 
-	var help := "Click a glowing node to battle  |  ESC to abandon run"
+	var help := "Click a node to continue  |  Scroll to explore map  |  ESC to abandon"
 	main.draw_string(font, Vector2(10, 590), help,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.5, 0.5, 0.55))
 
@@ -866,7 +874,7 @@ func draw_roguelike_map() -> void:
 		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
 		main.draw_string(font, Vector2(400 - msg_size.x / 2, 270), msg,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color(1.0, 0.3, 0.3))
-		var sub := "Act %d  |  Click to return" % main.run_act
+		var sub := "Floor %d  |  Click to return" % (main.run_current_row + 1)
 		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
 		main.draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.7, 0.5, 0.5))
@@ -876,7 +884,7 @@ func draw_roguelike_map() -> void:
 		var msg_size := font.get_string_size(msg, HORIZONTAL_ALIGNMENT_CENTER, -1, 36)
 		main.draw_string(font, Vector2(400 - msg_size.x / 2, 270), msg,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 36, Color(1.0, 0.85, 0.2))
-		var sub := "All 3 acts completed!  |  Click to return"
+		var sub := "All 16 floors completed!  |  Click to return"
 		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
 		main.draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.8, 0.75, 0.5))
