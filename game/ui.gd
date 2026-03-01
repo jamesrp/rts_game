@@ -620,6 +620,15 @@ func draw_roguelike_map() -> void:
 				if available:
 					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
 					main.draw_arc(pos, 19.0, 0, TAU, 32, Color(0.5, 0.8, 1.0, pulse), 2.0)
+			elif node["type"] == "treasure":
+				var tr_col := Color(1.0, 0.75, 0.2) if available else Color(0.5, 0.38, 0.1)
+				main.draw_circle(pos, 15.0, Color(0.12, 0.08, 0.02))
+				main.draw_arc(pos, 15.0, 0, TAU, 32, tr_col, 2.5)
+				# Draw chest/diamond icon
+				_draw_relic_diamond(pos, 7.0, tr_col)
+				if available:
+					var pulse: float = 0.4 + 0.4 * sin(main.game_time * 3.0)
+					main.draw_arc(pos, 19.0, 0, TAU, 32, Color(1.0, 0.75, 0.2, pulse), 2.0)
 			elif available:
 				var pulse: float = 0.6 + 0.3 * sin(main.game_time * 3.0)
 				main.draw_circle(pos, 14.0, Color(0.15, 0.2, 0.35))
@@ -871,6 +880,39 @@ func draw_roguelike_map() -> void:
 		var sub_size := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_CENTER, -1, 18)
 		main.draw_string(font, Vector2(400 - sub_size.x / 2, 310), sub,
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.8, 0.75, 0.5))
+	elif main.run_overlay == "treasure":
+		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
+		var tp := Rect2(200, 180, 400, 200)
+		main.draw_rect(tp, Color(0.1, 0.08, 0.02))
+		main.draw_rect(tp, Color(1.0, 0.75, 0.2), false, 2.0)
+		var tt := "TREASURE"
+		var tt_sz := font.get_string_size(tt, HORIZONTAL_ALIGNMENT_CENTER, -1, 24)
+		main.draw_string(font, Vector2(400 - tt_sz.x / 2, 215), tt,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.85, 0.3))
+		var tsub := "You found a relic!"
+		var ts_sz := font.get_string_size(tsub, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+		main.draw_string(font, Vector2(400 - ts_sz.x / 2, 238), tsub,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.7, 0.4))
+		if main.treasure_relic != "" and GameRelics.RELICS.has(main.treasure_relic):
+			var rd: Dictionary = GameRelics.RELICS[main.treasure_relic]
+			_draw_relic_diamond(Vector2(260, 290), 10.0, rd["color"])
+			main.draw_string(font, Vector2(280, 287), rd["name"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, rd["color"])
+			main.draw_string(font, Vector2(280, 305), rd["description"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.7, 0.75))
+			var claim := "Click to claim"
+			var cl_sz := font.get_string_size(claim, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(400 - cl_sz.x / 2, 360), claim,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.7))
+		else:
+			var empty := "The chest is empty..."
+			var em_sz := font.get_string_size(empty, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(400 - em_sz.x / 2, 295), empty,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.5, 0.5, 0.55))
+			var claim := "Click to continue"
+			var cl_sz := font.get_string_size(claim, HORIZONTAL_ALIGNMENT_CENTER, -1, 14)
+			main.draw_string(font, Vector2(400 - cl_sz.x / 2, 360), claim,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.6, 0.7))
 	elif main.run_overlay == "elite_reward":
 		main.draw_rect(Rect2(0, 0, GameData.SCREEN_W, GameData.SCREEN_H), Color(0, 0, 0, 0.72))
 		var ep := Rect2(200, 200, 400, 160)

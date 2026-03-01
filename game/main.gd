@@ -52,7 +52,7 @@ var run_upgrades: Dictionary = {"speed": 0, "attack": 0, "defense": 0}
 var run_map: Array = []  # Array of rows, each row is array of node dicts
 var run_current_row: int = 0
 var run_last_node: int = -1  # Column index chosen in current row
-var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire", "event"
+var run_overlay: String = ""  # "", "run_over", "run_won", "merchant", "elite_reward", "boss_reward", "campfire", "event", "treasure"
 var current_event: Dictionary = {}  # Current event data from GameEvents
 var event_result_text: String = ""  # Shown after choosing
 var campfire_upgrade_choices: Array = []  # Array of upgrade dicts offered at campfire
@@ -61,6 +61,7 @@ var run_relics: Array = []
 var merchant_relics: Array = []
 var merchant_relics_bought: Array = []
 var reward_relics: Array = []
+var treasure_relic: String = ""
 var first_power_used: bool = false
 var drain_field_timer: float = 0.0
 
@@ -174,6 +175,7 @@ func _start_roguelike_run() -> void:
 	merchant_relics = []
 	merchant_relics_bought = []
 	reward_relics = []
+	treasure_relic = ""
 	current_event = {}
 	event_result_text = ""
 	first_power_used = false
@@ -253,6 +255,18 @@ func _generate_run_map(act: int) -> Array:
 	if event_candidates.size() > 0:
 		var ec: Array = event_candidates[0]
 		map[ec[0]][ec[1]]["type"] = "event"
+
+	# Assign 1 treasure node in middle rows (rows 1-3, not row 0 or boss row)
+	var treasure_candidates: Array = []
+	for row_idx in [1, 2, 3]:
+		if row_idx < map.size() - 1:
+			for col_idx in range(map[row_idx].size()):
+				if map[row_idx][col_idx]["type"] == "battle":
+					treasure_candidates.append([row_idx, col_idx])
+	treasure_candidates.shuffle()
+	if treasure_candidates.size() > 0:
+		var tc: Array = treasure_candidates[0]
+		map[tc[0]][tc[1]]["type"] = "treasure"
 
 	# Generate edges between adjacent rows
 	for row_idx in range(map.size() - 1):
@@ -491,6 +505,19 @@ func _input_roguelike_map(event: InputEvent) -> void:
 			sfx_click.play()
 		return
 
+	# Treasure overlay: click to claim relic and advance
+	if run_overlay == "treasure":
+		var claim_rect := Rect2(250, 260, 300, 80)
+		if claim_rect.has_point(event.position):
+			if treasure_relic != "":
+				_claim_relic(treasure_relic)
+			treasure_relic = ""
+			run_map[run_current_row][run_last_node]["completed"] = true
+			run_current_row += 1
+			run_overlay = ""
+			sfx_click.play()
+		return
+
 	# Elite reward overlay: click to claim
 	if run_overlay == "elite_reward":
 		if reward_relics.size() > 0:
@@ -543,6 +570,10 @@ func _input_roguelike_map(event: InputEvent) -> void:
 				current_event = GameEvents.get_random_event()
 				event_result_text = ""
 				run_overlay = "event"
+			elif node["type"] == "treasure":
+				run_last_node = col_idx
+				treasure_relic = GameRelics.get_elite_relic(run_hero, run_relics)
+				run_overlay = "treasure"
 			else:
 				_start_roguelike_battle(col_idx)
 			return
