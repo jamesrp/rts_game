@@ -550,7 +550,7 @@ func draw_roguelike_map() -> void:
 						edge_color = Color(0.3, 0.5, 0.3, 0.7)
 					else:
 						edge_color = Color(0.25, 0.25, 0.3)
-				elif row_idx == main.run_current_row and main._is_node_available(row_idx, col_idx):
+				elif row_idx == main.run_current_row and main.roguelike._is_node_available(row_idx, col_idx):
 					edge_color = Color(0.4, 0.5, 0.7, 0.5)
 				main.draw_line(node_screen, next_node["position"] - scroll_offset, edge_color, 2.0)
 
@@ -560,7 +560,7 @@ func draw_roguelike_map() -> void:
 			var pos: Vector2 = node["position"] - scroll_offset
 			if pos.y < -30 or pos.y > 630:
 				continue
-			var available: bool = main._is_node_available(row_idx, col_idx)
+			var available: bool = main.roguelike._is_node_available(row_idx, col_idx)
 
 			if node["completed"]:
 				main.draw_circle(pos, 14.0, Color(0.2, 0.2, 0.25))
