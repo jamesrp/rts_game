@@ -180,6 +180,7 @@ func start_battle(col: int) -> void:
 		ai_level = 1 + floor_idx / 5  # 1 for floors 1-5, 2 for 6-10, 3 for 11-15
 		ai_level = clampi(ai_level, 1, 4)
 	main.in_roguelike_run = true
+	main.is_elite_battle = is_elite
 	var config: Dictionary = _generate_battle_map(ai_level, is_elite, difficulty_factor)
 	main._start_level("ai", ai_level, config)
 
@@ -188,6 +189,7 @@ func return_from_battle() -> void:
 	main._reset_battle_state()
 	main.hero.reset_battle_state()
 	main.in_roguelike_run = false
+	main.is_elite_battle = false
 
 	if won:
 		main.run_map[main.run_current_row][main.run_last_node]["completed"] = true
@@ -413,8 +415,6 @@ func handle_map_input(event: InputEvent) -> void:
 
 func _generate_battle_map(ai_level: int, is_elite: bool, difficulty_factor: float = 1.0) -> Dictionary:
 	var node_count: int = randi_range(10, 14) + ai_level
-	if is_elite:
-		node_count += 1
 	node_count = mini(node_count, 18)
 
 	# Pick a layout strategy
@@ -449,12 +449,6 @@ func _generate_battle_map(ai_level: int, is_elite: bool, difficulty_factor: floa
 		# Find second-farthest from bottom-left for second opponent base
 		opponent_indices.append(positions.size() - 2)
 
-	# Elite: add another opponent starting building
-	if is_elite and positions.size() > 5:
-		var next_opp: int = positions.size() - opponent_indices.size() - 1
-		if next_opp > 0 and next_opp not in opponent_indices and next_opp not in player_indices:
-			opponent_indices.append(next_opp)
-
 	# Assign units
 	var units: Array = []
 	for i in range(positions.size()):
@@ -487,15 +481,8 @@ func _generate_battle_map(ai_level: int, is_elite: bool, difficulty_factor: floa
 	for i in range(mini(tower_count, remaining_neutrals.size())):
 		towers.append(remaining_neutrals[i])
 
-	# Elite modifier: pre-upgrade some enemy buildings
-	var upgrades: Dictionary = {}
-	if is_elite:
-		for oi in opponent_indices:
-			if oi != opponent_indices[0]:
-				upgrades[oi] = 1
-
 	return {"positions": positions, "units": units, "player_indices": player_indices,
-		"opponent_indices": opponent_indices, "forges": forges, "towers": towers, "upgrades": upgrades}
+		"opponent_indices": opponent_indices, "forges": forges, "towers": towers, "upgrades": {}}
 
 func get_campfire_upgrades() -> Array:
 	if main.run_hero == "" or not GameData.HERO_UPGRADES.has(main.run_hero):

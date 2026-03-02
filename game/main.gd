@@ -45,6 +45,7 @@ var ai_timer: float = 0.0
 
 # === Roguelike Run State ===
 var in_roguelike_run: bool = false
+var is_elite_battle: bool = false
 var run_time_left: float = 600.0  # seconds; 10:00 starting total
 var run_act: int = 1
 var run_gold: int = 0

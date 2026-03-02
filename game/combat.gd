@@ -191,6 +191,8 @@ func get_defender_multiplier(building: Dictionary) -> float:
 		base *= 1.5
 	if building["owner"] == "player" and main.has_relic("iron_bastion"):
 		base *= 1.3
+	if building["owner"] == "opponent" and main.is_elite_battle:
+		base *= 2.0
 	return base
 
 func get_attacker_multiplier(owner: String) -> float:
